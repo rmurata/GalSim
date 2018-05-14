@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -19,8 +19,8 @@
 
 #ifndef GalSim_SBShapelet_H
 #define GalSim_SBShapelet_H
-/** 
- * @file SBShapelet.h @brief SBProfile that implements a polar shapelet profile 
+/**
+ * @file SBShapelet.h @brief SBProfile that implements a polar shapelet profile
  */
 
 #include "SBProfile.h"
@@ -29,10 +29,10 @@
 namespace galsim {
 
     /// @brief Class for describing polar shapelet surface brightness profiles.
-    class SBShapelet : public SBProfile 
+    class SBShapelet : public SBProfile
     {
     public:
-        /** 
+        /**
          * @brief Constructor.
          *
          * @param[in] sigma    scale size of Gauss-Laguerre basis set.
@@ -41,16 +41,17 @@ namespace galsim {
          * @param[in] gsparams GSParams object storing constants that control the accuracy of image
          *                     operations and rendering, if different from the default.
          */
-        SBShapelet(double sigma, LVector bvec, const GSParamsPtr& gsparams);
+        SBShapelet(double sigma, LVector bvec, const GSParams& gsparams);
 
-        /// @brief Copy Constructor. 
+        /// @brief Copy Constructor.
         SBShapelet(const SBShapelet& rhs);
 
-        /// @brief Destructor. 
+        /// @brief Destructor.
         ~SBShapelet();
 
         double getSigma() const;
         const LVector& getBVec() const;
+        void rotate(double theta);
 
     protected:
         class SBShapeletImpl;

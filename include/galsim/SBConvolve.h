@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -19,7 +19,7 @@
 
 #ifndef GalSim_SBConvolve_H
 #define GalSim_SBConvolve_H
-/** 
+/**
  * @file SBConvolve.h @brief SBProfile adapter which convolves 2 or more other SBProfiles.
  */
 
@@ -30,7 +30,7 @@ namespace galsim {
     // Defined in RealSpaceConvolve.cpp
     double RealSpaceConvolve(
         const SBProfile& p1, const SBProfile& p2, const Position<double>& pos, double flux,
-        const GSParamsPtr& gsparams);
+        const GSParams& gsparams);
 
     /**
      * @brief Convolve SBProfiles.
@@ -66,7 +66,7 @@ namespace galsim {
      * can be quicker to use real-space convolution instead.
      *
      */
-    class SBConvolve : public SBProfile 
+    class SBConvolve : public SBProfile
     {
     public:
         /**
@@ -77,8 +77,7 @@ namespace galsim {
          * @param[in] gsparams    GSParams object storing constants that control the accuracy of
          *                        image operations and rendering, if different from the default.
          */
-        SBConvolve(const std::list<SBProfile>& slist, bool real_space,
-                   const GSParamsPtr& gsparams);
+        SBConvolve(const std::list<SBProfile>& slist, bool real_space, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBConvolve(const SBConvolve& rhs);
@@ -101,7 +100,7 @@ namespace galsim {
         void operator=(const SBConvolve& rhs);
     };
 
-    // A special case of a convolution of a profile with itself, which allows for some 
+    // A special case of a convolution of a profile with itself, which allows for some
     // efficiency gains over SBConvolve(s,s)
     class SBAutoConvolve : public SBProfile
     {
@@ -113,7 +112,7 @@ namespace galsim {
          * @param[in] real_space  Do convolution in real space?
          * @param[in] gsparams    GSParams to use, if different from the default.
          */
-        SBAutoConvolve(const SBProfile& s, bool real_space, const GSParamsPtr& gsparams);
+        SBAutoConvolve(const SBProfile& s, bool real_space, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBAutoConvolve(const SBAutoConvolve& rhs);
@@ -149,7 +148,7 @@ namespace galsim {
          * @param[in] real_space  Do convolution in real space?
          * @param[in] gsparams    GSParams to use, if different from the default.
          */
-        SBAutoCorrelate(const SBProfile& s, bool real_space, const GSParamsPtr& gsparams);
+        SBAutoCorrelate(const SBProfile& s, bool real_space, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBAutoCorrelate(const SBAutoCorrelate& rhs);

@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -22,15 +22,9 @@
 #include "SBAdd.h"
 #include "SBAddImpl.h"
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-//std::ostream* dbgout = new std::ofstream("debug.out");
-//int verbose_level = 2;
-#endif
-
 namespace galsim {
 
-    SBAdd::SBAdd(const std::list<SBProfile>& slist, const GSParamsPtr& gsparams) :
+    SBAdd::SBAdd(const std::list<SBProfile>& slist, const GSParams& gsparams) :
         SBProfile(new SBAddImpl(slist,gsparams)) {}
 
     SBAdd::SBAdd(const SBAdd& rhs) : SBProfile(rhs) {}
@@ -43,6 +37,14 @@ namespace galsim {
         return static_cast<const SBAddImpl&>(*_pimpl).getObjs();
     }
 
+    double SBAdd::SBAddImpl::maxSB() const
+    {
+        ConstIter sptr = _plist.begin();
+        double maxsb = sptr->maxSB();
+        for (++sptr; sptr!=_plist.end(); ++sptr) maxsb += sptr->maxSB();
+        return maxsb;
+    }
+
     std::string SBAdd::SBAddImpl::serialize() const
     {
         std::ostringstream oss(" ");
@@ -50,13 +52,12 @@ namespace galsim {
         ConstIter sptr = _plist.begin();
         oss << sptr->serialize();
         for (++sptr; sptr!=_plist.end(); ++sptr) oss << ", " << sptr->serialize();
-        oss << "], galsim.GSParams("<<*gsparams<<"))";
+        oss << "], galsim._galsim.GSParams("<<gsparams<<"))";
         return oss.str();
     }
 
-    SBAdd::SBAddImpl::SBAddImpl(const std::list<SBProfile>& slist,
-                                const GSParamsPtr& gsparams) :
-        SBProfileImpl(gsparams ? gsparams : GetImpl(slist.front())->gsparams)
+    SBAdd::SBAddImpl::SBAddImpl(const std::list<SBProfile>& slist, const GSParams& gsparams) :
+        SBProfileImpl(gsparams)
     {
         for (ConstIter sptr = slist.begin(); sptr!=slist.end(); ++sptr)
             add(*sptr);
@@ -123,78 +124,82 @@ namespace galsim {
         return kv;
     }
 
-    void SBAdd::SBAddImpl::fillXValue(tmv::MatrixView<double> val,
+    template <typename T>
+    void SBAdd::SBAddImpl::fillXImage(ImageView<T> im,
                                       double x0, double dx, int izero,
                                       double y0, double dy, int jzero) const
     {
-        dbg<<"SBAdd fillXValue\n";
+        dbg<<"SBAdd fillXImage\n";
         dbg<<"x = "<<x0<<" + i * "<<dx<<", izero = "<<izero<<std::endl;
         dbg<<"y = "<<y0<<" + j * "<<dy<<", jzero = "<<jzero<<std::endl;
         ConstIter pptr = _plist.begin();
         assert(pptr != _plist.end());
-        GetImpl(*pptr)->fillXValue(val,x0,dx,izero,y0,dy,jzero);
+        GetImpl(*pptr)->fillXImage(im,x0,dx,izero,y0,dy,jzero);
         if (++pptr != _plist.end()) {
-            tmv::Matrix<double> val2(val.colsize(),val.rowsize());
+            ImageAlloc<T> im2(im.getBounds());
             for (; pptr != _plist.end(); ++pptr) {
-                GetImpl(*pptr)->fillXValue(val2.view(),x0,dx,izero,y0,dy,jzero);
-                val += val2;
+                GetImpl(*pptr)->fillXImage(im2.view(),x0,dx,izero,y0,dy,jzero);
+                im += im2;
             }
         }
     }
 
-    void SBAdd::SBAddImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
-                                      double kx0, double dkx, int izero,
-                                      double ky0, double dky, int jzero) const
-    {
-        dbg<<"SBAdd fillKValue\n";
-        dbg<<"kx = "<<kx0<<" + i * "<<dkx<<", izero = "<<izero<<std::endl;
-        dbg<<"ky = "<<ky0<<" + j * "<<dky<<", jzero = "<<jzero<<std::endl;
-        ConstIter pptr = _plist.begin();
-        assert(pptr != _plist.end());
-        GetImpl(*pptr)->fillKValue(val,kx0,dkx,izero,ky0,dky,jzero);
-        if (++pptr != _plist.end()) {
-            tmv::Matrix<std::complex<double> > val2(val.colsize(),val.rowsize());
-            for (; pptr != _plist.end(); ++pptr) {
-                GetImpl(*pptr)->fillKValue(val2.view(),kx0,dkx,izero,ky0,dky,jzero);
-                val += val2;
-            }
-        }
-    }
-
-    void SBAdd::SBAddImpl::fillXValue(tmv::MatrixView<double> val,
+    template <typename T>
+    void SBAdd::SBAddImpl::fillXImage(ImageView<T> im,
                                       double x0, double dx, double dxy,
                                       double y0, double dy, double dyx) const
     {
-        dbg<<"SBAdd fillXValue\n";
+        dbg<<"SBAdd fillXImage\n";
         dbg<<"x = "<<x0<<" + i * "<<dx<<" + j * "<<dxy<<std::endl;
         dbg<<"y = "<<y0<<" + i * "<<dyx<<" + j * "<<dy<<std::endl;
         ConstIter pptr = _plist.begin();
         assert(pptr != _plist.end());
-        GetImpl(*pptr)->fillXValue(val,x0,dx,dxy,y0,dy,dyx);
+        GetImpl(*pptr)->fillXImage(im,x0,dx,dxy,y0,dy,dyx);
         if (++pptr != _plist.end()) {
-            tmv::Matrix<double> val2(val.colsize(),val.rowsize());
+            ImageAlloc<T> im2(im.getBounds());
             for (; pptr != _plist.end(); ++pptr) {
-                GetImpl(*pptr)->fillXValue(val2.view(),x0,dx,dxy,y0,dy,dyx);
-                val += val2;
+                GetImpl(*pptr)->fillXImage(im2.view(),x0,dx,dxy,y0,dy,dyx);
+                im += im2;
             }
         }
     }
 
-    void SBAdd::SBAddImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBAdd::SBAddImpl::fillKImage(ImageView<std::complex<T> > im,
+                                      double kx0, double dkx, int izero,
+                                      double ky0, double dky, int jzero) const
+    {
+        dbg<<"SBAdd fillKImage\n";
+        dbg<<"kx = "<<kx0<<" + i * "<<dkx<<", izero = "<<izero<<std::endl;
+        dbg<<"ky = "<<ky0<<" + j * "<<dky<<", jzero = "<<jzero<<std::endl;
+        ConstIter pptr = _plist.begin();
+        assert(pptr != _plist.end());
+        GetImpl(*pptr)->fillKImage(im,kx0,dkx,izero,ky0,dky,jzero);
+        if (++pptr != _plist.end()) {
+            ImageAlloc<std::complex<T> > im2(im.getBounds());
+            for (; pptr != _plist.end(); ++pptr) {
+                GetImpl(*pptr)->fillKImage(im2.view(),kx0,dkx,izero,ky0,dky,jzero);
+                im += im2;
+            }
+        }
+    }
+
+    template <typename T>
+    void SBAdd::SBAddImpl::fillKImage(ImageView<std::complex<T> > im,
                                       double kx0, double dkx, double dkxy,
                                       double ky0, double dky, double dkyx) const
     {
-        dbg<<"SBAdd fillKValue\n";
+        dbg<<"SBAdd fillKImage\n";
         dbg<<"kx = "<<kx0<<" + i * "<<dkx<<" + j * "<<dkxy<<std::endl;
         dbg<<"ky = "<<ky0<<" + i * "<<dkyx<<" + j * "<<dky<<std::endl;
         ConstIter pptr = _plist.begin();
         assert(pptr != _plist.end());
-        GetImpl(*pptr)->fillKValue(val,kx0,dkx,dkxy,ky0,dky,dkyx);
+        GetImpl(*pptr)->fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx);
         if (++pptr != _plist.end()) {
-            tmv::Matrix<std::complex<double> > val2(val.colsize(),val.rowsize());
+            ImageAlloc<std::complex<T> > im2(im.getBounds());
             for (; pptr != _plist.end(); ++pptr) {
-                GetImpl(*pptr)->fillKValue(val2.view(),kx0,dkx,dkxy,ky0,dky,dkyx);
-                val += val2;
+                GetImpl(*pptr)->fillKImage(im2.view(),kx0,dkx,dkxy,ky0,dky,dkyx);
+                im += im2;
             }
         }
     }
@@ -217,18 +222,17 @@ namespace galsim {
         return result;
     }
 
-    boost::shared_ptr<PhotonArray> SBAdd::SBAddImpl::shoot(int N, UniformDeviate u) const
+    void SBAdd::SBAddImpl::shoot(PhotonArray& photons, UniformDeviate ud) const
     {
+        const int N = photons.size();
         dbg<<"Add shoot: N = "<<N<<std::endl;
         dbg<<"Target flux = "<<getFlux()<<std::endl;
         double totalAbsoluteFlux = getPositiveFlux() + getNegativeFlux();
         double fluxPerPhoton = totalAbsoluteFlux / N;
 
-        // Initialize the output array
-        boost::shared_ptr<PhotonArray> result(new PhotonArray(0));
-
         double remainingAbsoluteFlux = totalAbsoluteFlux;
         int remainingN = N;
+        int istart = 0;  // The location in the result array where we assign the component arrays.
 
         // Get photons from each summand, using BinomialDeviate to
         // randomize distribution of photons among summands
@@ -241,16 +245,18 @@ namespace galsim {
             ++nextPtr;
             if (nextPtr!=_plist.end()) {
                 // otherwise allocate a randomized fraction of the remaining photons to this summand:
-                BinomialDeviate bd(u, remainingN, thisAbsoluteFlux/remainingAbsoluteFlux);
+                BinomialDeviate bd(ud, remainingN, thisAbsoluteFlux/remainingAbsoluteFlux);
                 thisN = bd();
             }
             if (thisN > 0) {
-                boost::shared_ptr<PhotonArray> thisPA = pptr->shoot(thisN, u);
+                PhotonArray thisPA(thisN);
+                pptr->shoot(thisPA, ud);
                 // Now rescale the photon fluxes so that they are each nominally fluxPerPhoton
                 // whereas the shoot() routine would have made them each nominally
                 // thisAbsoluteFlux/thisN
-                thisPA->scaleFlux(fluxPerPhoton*thisN/thisAbsoluteFlux);
-                result->append(*thisPA);
+                thisPA.scaleFlux(fluxPerPhoton*thisN/thisAbsoluteFlux);
+                photons.assignAt(istart, thisPA);
+                istart += thisN;
             }
             remainingN -= thisN;
             remainingAbsoluteFlux -= thisAbsoluteFlux;
@@ -258,12 +264,10 @@ namespace galsim {
             if (remainingAbsoluteFlux <= 0.) break;
         }
 
-        dbg<<"Add Realized flux = "<<result->getTotalFlux()<<std::endl;
+        dbg<<"Add Realized flux = "<<photons.getTotalFlux()<<std::endl;
 
         // This process produces correlated photons, so mark the resulting array as such.
-        if (_plist.size() > 1) result->setCorrelated();
-
-        return result;
+        if (_plist.size() > 1) photons.setCorrelated();
     }
 
 }

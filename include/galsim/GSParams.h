@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -20,14 +20,14 @@
 #ifndef GalSim_GSParams_H
 #define GalSim_GSParams_H
 
-#define BOOST_NO_CXX11_SMART_PTR
-#include <boost/shared_ptr.hpp>
 #include <cassert>
 #include <ostream>
 
+#include "Std.h"
+
 namespace galsim {
 
-    struct GSParams 
+    struct GSParams
     {
 
         /**
@@ -35,41 +35,40 @@ namespace galsim {
          * tradeoff decisions.
          *
          * These parameters can be broadly split into two groups: i) parameters that affect the
-         * rendering of objects by Discrete Fourier Transform (DFT) and by real space convolution; 
-         * and ii) parameters that affect rendering by Photon Shooting, invoked using the SBProfile
-         * .draw() and .drawShoot() member functions, respectively.
+         * rendering of objects by Discrete Fourier Transform (DFT) and by real space convolution;
+         * and ii) parameters that affect rendering by photon shooting.
          *
          * The DFT and real space convolution relevant params are:
          *
          * @param minimum_fft_size    Constant giving minimum FFT size we're willing to do.
          * @param maximum_fft_size    Constant giving maximum FFT size we're willing to do.
-         * @param folding_threshold   A threshold parameter used for setting the stepK value for 
-         *                            FFTs.  The FFT's stepK is set so that at most a fraction 
+         * @param folding_threshold   A threshold parameter used for setting the stepK value for
+         *                            FFTs.  The FFT's stepK is set so that at most a fraction
          *                            folding_threshold of the flux of any profile is folded.
-         * @param stepk_minimum_hlr   In addition to the above constraint for aliasing, also set 
+         * @param stepk_minimum_hlr   In addition to the above constraint for aliasing, also set
          *                            stepk such that pi/stepk is at least stepk_minimum_hlr
          *                            times the profile's half-light radius (for profiles that
          *                            have a well-defined half-light radius).
-         * @param maxk_threshold      A threshold parameter used for setting the maxK value for 
-         *                            FFTs.  The FFT's maxK is set so that the k-values that are 
-         *                            excluded off the edge of the image are less than 
+         * @param maxk_threshold      A threshold parameter used for setting the maxK value for
+         *                            FFTs.  The FFT's maxK is set so that the k-values that are
+         *                            excluded off the edge of the image are less than
          *                            maxk_threshold.
          * @param kvalue_accuracy     Accuracy of values in k-space.
-         *                            If a k-value is less than kvalue_accuracy, then it may be set 
-         *                            to zero.  Similarly, if an alternate calculation has errors 
-         *                            less than kvalue_accuracy, then it may be used instead of an 
-         *                            exact calculation. 
-         *                            Note: This does not necessarily imply that all kvalues are 
-         *                            this accurate.  There may be cases where other choices we 
-         *                            have made lead to errors greater than this.  But whenever we 
-         *                            do an explicit calculation about this, this is the value we 
-         *                            use.  
+         *                            If a k-value is less than kvalue_accuracy, then it may be set
+         *                            to zero.  Similarly, if an alternate calculation has errors
+         *                            less than kvalue_accuracy, then it may be used instead of an
+         *                            exact calculation.
+         *                            Note: This does not necessarily imply that all kvalues are
+         *                            this accurate.  There may be cases where other choices we
+         *                            have made lead to errors greater than this.  But whenever we
+         *                            do an explicit calculation about this, this is the value we
+         *                            use.
          *                            This should typically be set to a lower, more stringent value
          *                            than maxk_threshold.
          * @param xvalue_accuracy     Accuracy of values in real space.
-         *                            If a value in real space is less than xvalue_accuracy, then 
-         *                            it may be set to zero.  Similarly, if an alternate 
-         *                            calculation has errors less than xvalue_accuracy, then it may 
+         *                            If a value in real space is less than xvalue_accuracy, then
+         *                            it may be set to zero.  Similarly, if an alternate
+         *                            calculation has errors less than xvalue_accuracy, then it may
          *                            be used instead of an exact calculation.
          * @param table_spacing       Several profiles use lookup tables for either the Hankel
          *                            transform (Sersic, truncated Moffat) or the real space
@@ -77,7 +76,7 @@ namespace galsim {
          *                            spacing between values in the lookup tables based on
          *                            either xvalue_accuracy or kvalue_accuracy as appropriate.
          *                            However, you may change the spacing with table_spacing.
-         *                            Using table_spacing < 1 will use a spacing value that much 
+         *                            Using table_spacing < 1 will use a spacing value that much
          *                            smaller than the default, which should produce more accurate
          *                            interpolations.
          * @param realspace_relerr    The target relative accuracy for real-space convolution.
@@ -173,14 +172,15 @@ namespace galsim {
 
     std::ostream& operator<<(std::ostream& os, const GSParams& gsp);
 
-    struct GSParamsPtr 
+    struct GSParamsPtr
     {
         /**
-         * @brief Basically equivalent to boost::shared_ptr<GSParams>, but adds op<, so 
+         * @brief Basically equivalent to shared_ptr<GSParams>, but adds op<, so
          * we can use it in stl containers.
          */
         GSParamsPtr(GSParams* p) : _p(p) {}
-        GSParamsPtr(boost::shared_ptr<GSParams> p) : _p(p) {}
+        GSParamsPtr(shared_ptr<GSParams> p) : _p(p) {}
+        GSParamsPtr(const GSParams& gsp) : _p(new GSParams(gsp)) {}
         GSParamsPtr() {}
         GSParamsPtr(const GSParamsPtr& rhs) : _p(rhs._p) {}
         GSParamsPtr& operator=(const GSParamsPtr& rhs) { _p = rhs._p; return *this; }
@@ -191,28 +191,22 @@ namespace galsim {
         GSParams* operator->() { assert(_p); return _p.get(); }
         const GSParams* operator->() const { assert(_p); return _p.get(); }
 
-        boost::shared_ptr<GSParams> getSharedPtr() { return _p; }
-        const boost::shared_ptr<GSParams> getSharedPtr() const { return _p; }
+        shared_ptr<GSParams> getSharedPtr() { return _p; }
+        const shared_ptr<GSParams> getSharedPtr() const { return _p; }
 
         const GSParams* get() const { return _p.get(); }
         GSParams* get() { return _p.get(); }
         operator bool() const { return _p.get(); }
-        const boost::shared_ptr<GSParams> getP() const { return _p; }
-        boost::shared_ptr<GSParams> getP() { return _p; }
+        const shared_ptr<GSParams> getP() const { return _p; }
+        shared_ptr<GSParams> getP() { return _p; }
 
         GSParamsPtr duplicate() const { return GSParamsPtr(new GSParams(*_p)); }
-
-        static const GSParamsPtr& getDefault() 
-        {
-            static GSParamsPtr def(new GSParams());
-            return def;
-        }
 
         bool operator==(const GSParamsPtr& rhs) const { return *_p == *rhs; }
         bool operator<(const GSParamsPtr& rhs) const { return *_p < *rhs; }
 
-    private : 
-        boost::shared_ptr<GSParams> _p;
+    private :
+        shared_ptr<GSParams> _p;
     };
 
 }

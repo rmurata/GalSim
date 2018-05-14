@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -17,6 +17,9 @@
  *    and/or other materials provided with the distribution.
  */
 
+// See https://www.dropbox.com/s/z6h14bgd199czsi/Inclined_Exponential.pdf?dl=0
+// for a write-up of much of the math involved in this file.
+
 // #define DEBUGLOGGING
 
 #include "galsim/IgnoreWarnings.h"
@@ -28,18 +31,11 @@
 #include "integ/Int.h"
 #include "Solve.h"
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-// std::ostream* dbgout = new std::ofstream("debug.out");
-std::ostream* dbgout = &std::cout;
-int verbose_level = 2;
-#endif
-
 namespace galsim {
 
     SBInclinedExponential::SBInclinedExponential(
-            Angle inclination, double scale_radius, double scale_height,
-            double flux, const GSParamsPtr& gsparams) :
+            double inclination, double scale_radius, double scale_height,
+            double flux, const GSParams& gsparams) :
         SBProfile(new SBInclinedExponentialImpl(
                 inclination, scale_radius, scale_height, flux, gsparams))
     {}
@@ -50,7 +46,7 @@ namespace galsim {
 
     SBInclinedExponential::~SBInclinedExponential() {}
 
-    Angle SBInclinedExponential::getInclination() const
+    double SBInclinedExponential::getInclination() const
     {
         assert(dynamic_cast<const SBInclinedExponentialImpl*>(_pimpl.get()));
         return static_cast<const SBInclinedExponentialImpl&>(*_pimpl).getInclination();
@@ -87,21 +83,21 @@ namespace galsim {
         oss << "galsim._galsim.SBInclinedExponential("<<getInclination();
         oss << ", "<<getScaleRadius()<<", "<<getScaleHeight();
         oss << ", "<<getFlux()<<", False";
-        oss << ", galsim.GSParams("<<*gsparams<<"))";
+        oss << ", galsim._galsim.GSParams("<<gsparams<<"))";
         return oss.str();
     }
 
     SBInclinedExponential::SBInclinedExponentialImpl::SBInclinedExponentialImpl(
-            Angle inclination, double scale_radius,
-            double scale_height, double flux, const GSParamsPtr& gsparams) :
+            double inclination, double scale_radius,
+            double scale_height, double flux, const GSParams& gsparams) :
         SBProfileImpl(gsparams),
         _inclination(inclination),
         _r0(scale_radius),
         _h0(scale_height),
         _flux(flux),
         _inv_r0(1./scale_radius),
-        _half_pi_h_sini_over_r(0.5*M_PI*scale_height*std::abs(inclination.sin())/scale_radius),
-        _cosi(std::abs(inclination.cos())),
+        _half_pi_h_sini_over_r(0.5*M_PI*scale_height*std::abs(std::sin(inclination))/scale_radius),
+        _cosi(std::abs(std::cos(inclination))),
         _ksq_max(integ::MOCK_INF) // Start with infinite _ksq_max so we can use kValueHelper to
                                   // get a better value
     {
@@ -127,13 +123,13 @@ namespace galsim {
         // A fast solution to (1+R)exp(-R) = x:
         // log(1+R) - R = log(x)
         // R = log(1+R) - log(x)
-        double logx = std::log(this->gsparams->folding_threshold);
+        double logx = std::log(this->gsparams.folding_threshold);
         double R = -logx;
         for (int i=0; i<3; i++) R = std::log(1.+R) - logx;
         // Make sure it is at least 5 hlr of corresponding exponential
         // half-light radius = 1.6783469900166605 * r0
         const double exp_hlr = 1.6783469900166605;
-        R = std::max(R,this->gsparams->stepk_minimum_hlr*exp_hlr);
+        R = std::max(R,this->gsparams.stepk_minimum_hlr*exp_hlr);
         _stepk = M_PI / R;
         dbg<<"stepk = "<<_stepk<<std::endl;
 
@@ -142,13 +138,13 @@ namespace galsim {
         // This is acceptable when the next term is less than kvalue_accuracy.
         // (35/16 + 31/15120 pi/2*h*sin(i)/r) * (k^2*r^2)^3 = kvalue_accuracy
         // This is a bit conservative, note, assuming kx = 0
-        _ksq_min = std::pow(this->gsparams->kvalue_accuracy /
+        _ksq_min = std::pow(this->gsparams.kvalue_accuracy /
                             (35./16. + 31./15120.*_half_pi_h_sini_over_r), 1./3.);
 
         // Solve for the proper _maxk and _ksq_max
 
-        double maxk_min = std::pow(this->gsparams->maxk_threshold, -1./3.);
-        double clipk_min = std::pow(this->gsparams->kvalue_accuracy, -1./3.);
+        double maxk_min = std::pow(this->gsparams.maxk_threshold, -1./3.);
+        double clipk_min = std::pow(this->gsparams.kvalue_accuracy, -1./3.);
 
         // Check for face-on case, which doesn't need the solver
         if(_cosi==1)
@@ -180,11 +176,11 @@ namespace galsim {
                 clipk_max = 100*clipk_min;
             }
 
-            xdbg << "maxk_threshold = " << this->gsparams->maxk_threshold << std::endl;
+            xdbg << "maxk_threshold = " << this->gsparams.maxk_threshold << std::endl;
             xdbg << "F(" << maxk_min << ") = " << std::max(kValueHelper(maxk_min,0.),kValueHelper(0.,maxk_min)) << std::endl;
             xdbg << "F(" << maxk_max << ") = " << std::max(kValueHelper(maxk_max,0.),kValueHelper(0.,maxk_max)) << std::endl;
 
-            SBInclinedExponentialKValueFunctor maxk_func(this,this->gsparams->maxk_threshold);
+            SBInclinedExponentialKValueFunctor maxk_func(this,this->gsparams.maxk_threshold);
             Solve<SBInclinedExponentialKValueFunctor> maxk_solver(maxk_func, maxk_min, maxk_max);
             maxk_solver.setMethod(Brent);
 
@@ -200,11 +196,11 @@ namespace galsim {
             xdbg << "_maxk = " << _maxk << std::endl;
             xdbg << "F(" << _maxk << ") = " << kValueHelper(0.,_maxk) << std::endl;
 
-            xdbg << "kvalue_accuracy = " << this->gsparams->kvalue_accuracy << std::endl;
+            xdbg << "kvalue_accuracy = " << this->gsparams.kvalue_accuracy << std::endl;
             xdbg << "F(" << clipk_min << ") = " << kValueHelper(0.,clipk_min) << std::endl;
             xdbg << "F(" << clipk_max << ") = " << kValueHelper(0.,clipk_max) << std::endl;
 
-            SBInclinedExponentialKValueFunctor clipk_func(this,this->gsparams->kvalue_accuracy);
+            SBInclinedExponentialKValueFunctor clipk_func(this,this->gsparams.kvalue_accuracy);
             Solve<SBInclinedExponentialKValueFunctor> clipk_solver(clipk_func, clipk_min, clipk_max);
 
             if(clipk_func(clipk_min)<=0)
@@ -222,6 +218,22 @@ namespace galsim {
         }
     }
 
+    double SBInclinedExponential::SBInclinedExponentialImpl::maxSB() const
+    {
+        // When the disk is face on, the max SB is flux / 2 pi r0^2
+        // When the disk is edge on, the max SB is flux / 2 pi r0^2 * (r0/h0)
+        double maxsb = _flux * _inv_r0 * _inv_r0 / (2. * M_PI);
+        // The relationship for inclinations in between these is not linear.
+        // Empirically, it is vaguely linearish in ln(maxsb) vs. sqrt(cosi), so we use that for
+        // the interpolation.
+        double sc = sqrt(std::abs(_cosi));
+        maxsb *= std::exp(std::log(_r0/_h0) * (1.-sc));
+
+        // Err on the side of overestimating by multiplying by conservative_factor,
+        // which was found to work for the worst-case scenario
+        return std::abs(maxsb);
+    }
+
     double SBInclinedExponential::SBInclinedExponentialImpl::xValue(const Position<double>& p) const
     {
         throw std::runtime_error(
@@ -237,55 +249,53 @@ namespace galsim {
         return _flux * kValueHelper(kx,ky);
     }
 
-    void SBInclinedExponential::SBInclinedExponentialImpl::fillKValue(
-        tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBInclinedExponential::SBInclinedExponentialImpl::fillKImage(
+        ImageView<std::complex<T> > im,
         double kx0, double dkx, int izero,
         double ky0, double dky, int jzero) const
     {
-        dbg<<"SBInclinedExponential fillKValue\n";
+        dbg<<"SBInclinedExponential fillKImage\n";
         dbg<<"kx = "<<kx0<<" + i * "<<dkx<<", izero = "<<izero<<std::endl;
         dbg<<"ky = "<<ky0<<" + j * "<<dky<<", jzero = "<<jzero<<std::endl;
         if (izero != 0 || jzero != 0) {
             xdbg<<"Use Quadrant\n";
-            fillKValueQuadrant(val,kx0,dkx,izero,ky0,dky,jzero);
+            fillKImageQuadrant(im,kx0,dkx,izero,ky0,dky,jzero);
         } else {
             xdbg<<"Non-Quadrant\n";
-            assert(val.stepi() == 1);
-            const int m = val.colsize();
-            const int n = val.rowsize();
-            typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+            const int m = im.getNCol();
+            const int n = im.getNRow();
+            std::complex<T>* ptr = im.getData();
+            int skip = im.getNSkip();
+            assert(im.getStep() == 1);
 
             kx0 *= _r0;
             dkx *= _r0;
             ky0 *= _r0;
             dky *= _r0;
 
-            for (int j=0;j<n;++j,ky0+=dky) {
+            for (int j=0; j<n; ++j,ky0+=dky,ptr+=skip) {
                 double kx = kx0;
-                It valit = val.col(j).begin();
-                for (int i=0;i<m;++i,kx+=dkx) {
-                    double new_val = _flux * kValueHelper(kx,ky0);
-                    xxdbg << "kx = " << kx << "\tky = " << ky0;
-                    xxdbg << "\tval = " << new_val << std::endl;
-                    *valit++ = new_val;
-                }
+                for (int i=0; i<m; ++i,kx+=dkx)
+                    *ptr++ = _flux * kValueHelper(kx,ky0);
             }
         }
     }
 
-    void SBInclinedExponential::SBInclinedExponentialImpl::fillKValue(
-        tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBInclinedExponential::SBInclinedExponentialImpl::fillKImage(
+        ImageView<std::complex<T> > im,
         double kx0, double dkx, double dkxy,
         double ky0, double dky, double dkyx) const
     {
-        dbg<<"SBInclinedExponential fillKValue\n";
+        dbg<<"SBInclinedExponential fillKImage\n";
         dbg<<"kx = "<<kx0<<" + i * "<<dkx<<" + j * "<<dkxy<<std::endl;
         dbg<<"ky = "<<ky0<<" + i * "<<dkyx<<" + j * "<<dky<<std::endl;
-        assert(val.stepi() == 1);
-        assert(val.canLinearize());
-        const int m = val.colsize();
-        const int n = val.rowsize();
-        typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
         kx0 *= _r0;
         dkx *= _r0;
@@ -294,13 +304,11 @@ namespace galsim {
         dky *= _r0;
         dkyx *= _r0;
 
-        It valit = val.linearView().begin();
-        for (int j=0;j<n;++j,kx0+=dkxy,ky0+=dky) {
+        for (int j=0; j<n; ++j,kx0+=dkxy,ky0+=dky,ptr+=skip) {
             double kx = kx0;
             double ky = ky0;
-            for (int i=0;i<m;++i,kx+=dkx,ky+=dkyx) {
-                *valit++ = _flux * kValueHelper(kx,ky);
-            }
+            for (int i=0; i<m; ++i,kx+=dkx,ky+=dkyx)
+                *ptr++ = _flux * kValueHelper(kx,ky);
         }
     }
 
@@ -363,8 +371,8 @@ namespace galsim {
     }
 
     // Not yet implemented, but needs to be defined
-    boost::shared_ptr<PhotonArray> SBInclinedExponential::SBInclinedExponentialImpl::shoot(
-        int N, UniformDeviate ud) const
+    void SBInclinedExponential::SBInclinedExponentialImpl::shoot(
+        PhotonArray& photons, UniformDeviate ud) const
     {
         throw std::runtime_error(
             "Photon shooting not yet implemented for SBInclinedExponential profile.");

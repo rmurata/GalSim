@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -16,12 +16,12 @@
 #    and/or other materials provided with the distribution.
 #
 """@file catalog.py
-Routines for controlling catalog input/output with GalSim. 
+Routines for controlling catalog input/output with GalSim.
 """
 
 from future.utils import iteritems, iterkeys, itervalues
 from builtins import zip
-import galsim
+import os
 import numpy as np
 
 class Catalog(object):
@@ -34,7 +34,7 @@ class Catalog(object):
     --------------
 
     @param file_name    Filename of the input catalog. (Required)
-    @param dir          Optionally a directory name can be provided if `file_name` does not 
+    @param dir          Optionally a directory name can be provided if `file_name` does not
                         already include it.
     @param file_type    Either 'ASCII' or 'FITS'.  If None, infer from `file_name` ending.
                         [default: None]
@@ -69,7 +69,7 @@ class Catalog(object):
         if dir is not None:
             import os
             self.file_name = os.path.join(dir,self.file_name)
-    
+
         if file_type is None:
             import os
             name, ext = os.path.splitext(file_name)
@@ -90,7 +90,7 @@ class Catalog(object):
             self.readAscii(comments, _nobjects_only)
         else:
             raise ValueError("Invalid file_type %s"%file_type)
-            
+
     # When we make a proxy of this class (cf. galsim/config/stamp.py), the attributes
     # don't get proxied.  Only callable methods are.  So make method versions of these.
     def getNObjects(self) : return self.nobjects
@@ -114,7 +114,7 @@ class Catalog(object):
 
         # Read in the data using the numpy convenience function
         # Note: we leave the data as str, rather than convert to float, so that if
-        # we have any str fields, they don't give an error here.  They'll only give an 
+        # we have any str fields, they don't give an error here.  They'll only give an
         # error if one tries to convert them to float at some point.
         self.data = np.loadtxt(self.file_name, comments=comments, dtype=bytes)
         # Convert the bytes to str.  For Py2, this is a no op.
@@ -133,7 +133,7 @@ class Catalog(object):
     def readFits(self, hdu, _nobjects_only=False):
         """Read in an input catalog from a FITS file.
         """
-        from galsim._pyfits import pyfits, pyfits_version
+        from ._pyfits import pyfits, pyfits_version
         with pyfits.open(self.file_name) as fits:
             raw_data = fits[hdu].data
         if pyfits_version > '3.0':
@@ -142,7 +142,7 @@ class Catalog(object):
             self.names = raw_data.dtype.names
         self.nobjects = len(raw_data.field(self.names[0]))
         if (_nobjects_only): return
-        # The pyfits raw_data is a FITS_rec object, which isn't picklable, so we need to 
+        # The pyfits raw_data is a FITS_rec object, which isn't picklable, so we need to
         # copy the fields into a new structure to make sure our Catalog is picklable.
         # The simplest is probably a dict keyed by the field names, which we save as self.data.
         self.data = {}
@@ -154,10 +154,10 @@ class Catalog(object):
     def get(self, index, col):
         """Return the data for the given `index` and `col` in its native type.
 
-        For ASCII catalogs, `col` is the column number.  
+        For ASCII catalogs, `col` is the column number.
         For FITS catalogs, `col` is a string giving the name of the column in the FITS table.
 
-        Also, for ASCII catalogs, the "native type" is always str.  For FITS catalogs, it is 
+        Also, for ASCII catalogs, the "native type" is always str.  For FITS catalogs, it is
         whatever type is specified for each field in the binary table.
         """
         if self.isfits:
@@ -213,14 +213,14 @@ class Dict(object):
 
     is expanded into
 
-        >>> d['noise']['properties']['variance'] 
+        >>> d['noise']['properties']['variance']
 
-    Furthermore, if a "key" is really an integer, then it is used as such, which accesses 
+    Furthermore, if a "key" is really an integer, then it is used as such, which accesses
     the corresponding element in a list.  e.g.
 
         >>> d.get('noise_models.2.variance')
-        
-    is equivalent to 
+
+    is equivalent to
 
         >>> d['noise_models'][2]['variance']
 
@@ -232,12 +232,12 @@ class Dict(object):
 
 
     @param file_name    Filename storing the dict.
-    @param dir          Optionally a directory name can be provided if `file_name` does not 
+    @param dir          Optionally a directory name can be provided if `file_name` does not
                         already include it. [default: None]
-    @param file_type    Options are 'Pickle', 'YAML', or 'JSON' or None.  If None, infer from 
+    @param file_type    Options are 'Pickle', 'YAML', or 'JSON' or None.  If None, infer from
                         `file_name` extension ('.p*', '.y*', '.j*' respectively).
                         [default: None]
-    @param key_split    The character (or string) to use to split chained keys.  (cf. the 
+    @param key_split    The character (or string) to use to split chained keys.  (cf. the
                         description of this feature above.)  [default: '.']
     """
     _req_params = { 'file_name' : str }
@@ -252,7 +252,7 @@ class Dict(object):
         if dir is not None:
             import os
             self.file_name = os.path.join(dir,self.file_name)
-    
+
         if file_type is None:
             import os
             name, ext = os.path.splitext(self.file_name)
@@ -296,7 +296,7 @@ class Dict(object):
         d = self.dict
         while len(chain):
             k = chain.pop(0)
-            
+
             # Try to convert to an integer:
             try: k = int(k)
             except ValueError: pass
@@ -304,7 +304,7 @@ class Dict(object):
             # If there are more keys, just set d to the next in the chanin.
             if chain: d = d[k]
             # Otherwise, return the result.
-            else: 
+            else:
                 if k not in d and default is None:
                     raise ValueError("key=%s not found in dictionary"%key)
                 return d.get(k,default)
@@ -434,7 +434,7 @@ class OutputCatalog(object):
         """Write the catalog to a file.
 
         @param file_name    The name of the file to write to.
-        @param dir          Optionally a directory name can be provided if `file_name` does not 
+        @param dir          Optionally a directory name can be provided if `file_name` does not
                             already include it. [default: None]
         @param file_type    Which kind of file to write to. [default: determine from the file_name
                             extension]
@@ -466,6 +466,10 @@ class OutputCatalog(object):
     def makeData(self):
         """Returns a numpy array of the data as it should be written to an output file.
         """
+        from .angle import Angle
+        from .position import PositionD, PositionI
+        from .shear import Shear
+
         cols = zip(*self.rows)
 
         dtypes = []
@@ -479,20 +483,20 @@ class OutputCatalog(object):
             elif dt.kind in np.typecodes['AllFloat']:
                 dtypes.append( (name, float) )
                 new_cols.append(col)
-            elif t == galsim.Angle:
+            elif t == Angle:
                 dtypes.append( (name + ".rad", float) )
-                new_cols.append( [ val.rad() for val in col ] )
-            elif t == galsim.PositionI:
+                new_cols.append( [ val.rad for val in col ] )
+            elif t == PositionI:
                 dtypes.append( (name + ".x", int) )
                 dtypes.append( (name + ".y", int) )
                 new_cols.append( [ val.x for val in col ] )
                 new_cols.append( [ val.y for val in col ] )
-            elif t == galsim.PositionD:
+            elif t == PositionD:
                 dtypes.append( (name + ".x", float) )
                 dtypes.append( (name + ".y", float) )
                 new_cols.append( [ val.x for val in col ] )
                 new_cols.append( [ val.y for val in col ] )
-            elif t == galsim.Shear:
+            elif t == Shear:
                 dtypes.append( (name + ".g1", float) )
                 dtypes.append( (name + ".g2", float) )
                 new_cols.append( [ val.g1 for val in col ] )
@@ -547,8 +551,9 @@ class OutputCatalog(object):
 
         @param file_name    The name of the file to write to.
         """
+        from .fits import writeFile
         tbhdu = self.writeFitsHdu()
-        tbhdu.writeto(file_name, clobber=True)
+        writeFile(file_name, tbhdu)
 
     def writeFitsHdu(self):
         """Write catalog to a FITS hdu.
@@ -558,7 +563,7 @@ class OutputCatalog(object):
         # Note to developers: Because of problems with pickling in older pyfits versions, this
         # code is duplicated in galsim/config/extra_truth.py, BuildTruthHDU.  If you change
         # this function, you should update BuildTruthHDU as well.
-        from galsim._pyfits import pyfits
+        from ._pyfits import pyfits
 
         data = self.makeData()
 
@@ -577,7 +582,7 @@ class OutputCatalog(object):
         # Depending on the version of pyfits, one of these should work:
         try:
             tbhdu = pyfits.BinTableHDU.from_columns(cols)
-        except:  # pragma: no cover
+        except AttributeError:  # pragma: no cover
             tbhdu = pyfits.new_table(cols)
         return tbhdu
 

@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -25,12 +25,21 @@
 #include <string>
 #include <iostream>
 #include <sstream>
-#define BOOST_NO_CXX11_SMART_PTR
-#include <boost/shared_ptr.hpp>
+#ifdef USE_TMV
 #include "TMV.h"
+typedef tmv::Vector<double> VectorXd;
+typedef tmv::Matrix<double> MatrixXd;
+typedef tmv::Vector<std::complex<double> > VectorXcd;
+typedef tmv::Matrix<std::complex<double> > MatrixXcd;
+#else
+#include "Eigen/Dense"
+using Eigen::VectorXd;
+using Eigen::MatrixXd;
+using Eigen::VectorXcd;
+using Eigen::MatrixXcd;
+#endif
 
 #include "Std.h"
-#include "Angle.h"
 
 namespace galsim {
 
@@ -58,31 +67,31 @@ namespace galsim {
         // for a real-valued image.  The storage order here is:
         //  pq:        Re(00); Re(10), Im(10); Re(20), Im(20), Re(11); ...
         //  rIndex:     0        1       2       3       4       5     ...
-        // 
-        // Methods include increments for p, q, N, and m.  This object can 
+        //
+        // Methods include increments for p, q, N, and m.  This object can
         // be used as an index into any of our Laguerre arrays.
     public:
-        PQIndex() : p(0), q(0) {} 
+        PQIndex() : p(0), q(0) {}
         PQIndex(const int p_, const int q_) { setPQ(p_,q_); }
 
         bool pqValid() const { return p>=0 && q>=0; }
 
         int getP() const { return p; }
         int getQ() const { return q; }
-        PQIndex& setPQ(const int p_, const int q_) 
-        { 
+        PQIndex& setPQ(const int p_, const int q_)
+        {
             p=p_;
             q=q_;
-            return *this; 
+            return *this;
         }
 
         int N() const { return p+q; }
         int m() const { return p-q; }
-        PQIndex& setNm(const int N, const int m) 
+        PQIndex& setNm(const int N, const int m)
         {
             assert(std::abs(m)<=N && (N-m)%2==0);
             p=(N+m)/2;
-            q=(N-m)/2; 
+            q=(N-m)/2;
             return *this;
         }
 
@@ -104,16 +113,16 @@ namespace galsim {
         void decm() { p--; q++; } // lower m by 2, same N (could be invalid)
 
         // get next one in complex sequence
-        PQIndex& operator++()  
-        { 
+        PQIndex& operator++()
+        {
             if (p==0) { p=q+1; q=0; }
             else { --p; ++q; }
             return *this;
         }
 
         // get next pq index that has m>=0
-        PQIndex& nextDistinct()  
-        { 
+        PQIndex& nextDistinct()
+        {
             if (p-q<2) { p=p+q+1; q=0; }
             else { --p; ++q; }
             return *this;
@@ -122,17 +131,17 @@ namespace galsim {
 
         // Functions to report incremented/decremented indices without
         // updating this index:
-        PQIndex swapPQ() const { return PQIndex(q,p); } 
+        PQIndex swapPQ() const { return PQIndex(q,p); }
         PQIndex pp1() const { return PQIndex(p+1,q); }
         PQIndex qp1() const { return PQIndex(p,q+1); }
         PQIndex pm1() const { return PQIndex(p-1,q); }
         PQIndex qm1() const { return PQIndex(p,q-1); }
 
-        bool operator==(const PQIndex rhs) const 
+        bool operator==(const PQIndex rhs) const
         { return p==rhs.p && q==rhs.q; }
 
         // Other useful things:
-        static int size(int order) 
+        static int size(int order)
         {
             // Size of a CVector to this order N, same as number of real DOF:
             assert(order>=0);
@@ -160,13 +169,13 @@ namespace galsim {
 
     };
 
-    inline std::ostream& operator<<(std::ostream& os, const PQIndex& pq) 
+    inline std::ostream& operator<<(std::ostream& os, const PQIndex& pq)
     { pq.write(os); return os; }
 
     //--------------------------------------------------------------
     // Next object is a vector of Laguerre coefficients.  Note this is
     // a HANDLE to the coefficient vector, so it can be passed into
-    // subroutines without referencing.  Copy/assignment create a new link; 
+    // subroutines without referencing.  Copy/assignment create a new link;
     // for fresh copy, use copy() method.
     //
     // LVectors are assumed to be Hermitian complex (b_qp=b_pq*), and the
@@ -175,31 +184,31 @@ namespace galsim {
     // So when you change b_qp, you are also changing b_pq.
 
     // Reference to a pq-indexed complex element of an LVector:
-    class LVectorReference 
+    class LVectorReference
     {
     public:
-        operator std::complex<double>() const 
+        operator std::complex<double>() const
         {
             if (_isign==0) return std::complex<double>(*_re,0.);
             else return std::complex<double>(*_re, *(_re+1)*_isign);
         }
-        LVectorReference& operator=(std::complex<double> z) 
+        LVectorReference& operator=(std::complex<double> z)
         {
             *_re = z.real();
             if (_isign!=0) *(_re+1)=z.imag()*_isign;
             // Choosing *not* to check for zero imaginary part here
             return *this;
         }
-        LVectorReference& operator=(double d) 
+        LVectorReference& operator=(double d)
         {
             *_re = d;
             if (_isign!=0) *(_re+1)=0.;
             return *this;
         }
         // ??? +=, -=, etc.
-        
+
     private:
-        LVectorReference(tmv::Vector<double>& v, PQIndex pq) :
+        LVectorReference(VectorXd& v, PQIndex pq) :
             _re(&v[pq.rIndex()]), _isign(pq.iSign()) {}
         double *_re;
         int _isign; // 0 if this is a real element, -1 if needs conjugation, else +1
@@ -207,66 +216,47 @@ namespace galsim {
         friend class LVector;
     };
 
-    // A custom deleter to allow us to return views to the LVector as numpy arrays
-    // which will keep track of the Vector allocation.  When the last LVector _or_
-    // external view of _owner goes out of scope, then the tmv::Vector is destroyed.
-    class LVectorDeleter
-    {
-    public:
-        LVectorDeleter(boost::shared_ptr<tmv::Vector<double> > v) : _v(v) {}
-
-        void operator()(double * p) const {} // the _v shared_ptr will delete for us!
-
-        boost::shared_ptr<tmv::Vector<double> > _v;
-    };
-
-    class LVector 
+    class LVector
     {
     public:
         // Construct/destruct:
-        LVector(int order) : _order(order) 
-        { 
-            allocateMem(); 
+        LVector(int order) : _order(order)
+        {
+            allocateMem();
             _v->setZero();
         }
 
-        LVector(int order, const tmv::GenVector<double>& v) :
+        LVector(int order, const VectorXd& v) :
             _order(order)
         {
             allocateMem();
             *_v = v;
-            assert(v.size() == PQIndex::size(order)); 
+            assert(v.size() == PQIndex::size(order));
         }
 
-        LVector(int order, boost::shared_ptr<tmv::Vector<double> > v) :
-            _order(order), _v(v),
-            _owner(_v->ptr(), LVectorDeleter(_v))
-        { assert(v->size() == PQIndex::size(order)); }
+        LVector(const LVector& rhs) : _order(rhs._order), _v(rhs._v) {}
 
-        LVector(const LVector& rhs) : _order(rhs._order), _v(rhs._v), _owner(rhs._owner) {}
-
-        LVector& operator=(const LVector& rhs) 
+        LVector& operator=(const LVector& rhs)
         {
             if (_v.get()==rhs._v.get()) return *this;
             _order=rhs._order;
             _v = rhs._v;
-            _owner = rhs._owner;
             return *this;
         }
 
         ~LVector() {}
 
-        LVector copy() const 
+        LVector copy() const
         { return LVector(_order,*_v); }
 
-        void resize(int order) 
+        void resize(int order)
         {
             if (_order != order) {
                 _order = order;
                 allocateMem();
                 _v->setZero();
             } else {
-                // The caller may be relying on resize to get a unique vector, so if 
+                // The caller may be relying on resize to get a unique vector, so if
                 // we don't make a new one, at least take ownership of the current one.
                 take_ownership();
             }
@@ -278,8 +268,8 @@ namespace galsim {
         // So for all non-const methods, we first take ownership of the internal vector
         // by making a new copy of the vector first.  If it is already the sole owner,
         // then nothing is done.  (FYI: The term for this is "Copy on Write" semantics.)
-        void take_ownership() 
-        { if (!_v.unique()) { _v.reset(new tmv::Vector<double>(*_v)); } }
+        void take_ownership()
+        { if (!_v.unique()) { _v.reset(new VectorXd(*_v)); } }
 
         void clear() { take_ownership(); _v->setZero(); }
 
@@ -291,8 +281,8 @@ namespace galsim {
         int size() const { return _v->size(); }
 
         // Access the real-representation vector directly.
-        const tmv::Vector<double>& rVector() const { return *_v; }
-        tmv::Vector<double>& rVector() { take_ownership(); return *_v; }
+        const VectorXd& rVector() const { return *_v; }
+        VectorXd& rVector() { take_ownership(); return *_v; }
 
         // op[] with int returns real
         double operator[](int i) const { return (*_v)[i]; }
@@ -300,54 +290,54 @@ namespace galsim {
 
         // Access as complex elements
         // op[] with PQIndex returns complex
-        std::complex<double> operator[](PQIndex pq) const 
+        std::complex<double> operator[](PQIndex pq) const
         {
             int isign=pq.iSign();
             if (isign==0) return std::complex<double>( (*_v)[pq.rIndex()], 0.);
             else return std::complex<double>( (*_v)[pq.rIndex()], isign*(*_v)[pq.rIndex()+1]);
         }
-        LVectorReference operator[](PQIndex pq) 
+        LVectorReference operator[](PQIndex pq)
         { take_ownership(); return LVectorReference(*_v, pq); }
 
         // op() with p,q values returns complex
-        std::complex<double> operator()(int p, int q) const 
+        std::complex<double> operator()(int p, int q) const
         { return (*this)[PQIndex(p,q)]; }
-        LVectorReference operator()(int p, int q) 
+        LVectorReference operator()(int p, int q)
         { take_ownership(); return (*this)[PQIndex(p,q)]; }
 
         // scalar arithmetic:
-        LVector& operator*=(double s) 
+        LVector& operator*=(double s)
         { take_ownership(); *_v *= s; return *this; }
-        LVector& operator/=(double s) 
+        LVector& operator/=(double s)
         { take_ownership(); *_v /= s; return *this; }
 
-        LVector operator*(double s) const 
+        LVector operator*(double s) const
         {
             LVector fresh = *this;
             fresh *= s;
             return fresh;
         }
 
-        LVector operator/(double s) const 
+        LVector operator/(double s) const
         {
             LVector fresh = *this;
             fresh /= s;
             return fresh;
         }
 
-        LVector& operator+=(const LVector& rhs) 
+        LVector& operator+=(const LVector& rhs)
         {
             take_ownership();
             assert(_order==rhs._order);
-            *_v += *(rhs._v); 
+            *_v += *(rhs._v);
             return *this;
         }
 
-        LVector& operator-=(const LVector& rhs) 
+        LVector& operator-=(const LVector& rhs)
         {
             take_ownership();
             assert(_order==rhs._order);
-            *_v -= *(rhs._v); 
+            *_v -= *(rhs._v);
             return *this;
         }
 
@@ -366,7 +356,13 @@ namespace galsim {
         }
 
         // Inner product of the real values.
-        double dot(const LVector& rhs) const { return (*_v)*(*rhs._v); }
+        double dot(const LVector& rhs) const {
+#ifdef USE_TMV
+            return (*_v)*(*rhs._v);
+#else
+            return _v->dot(*rhs._v);
+#endif
+        }
 
         // write to an ostream
         void write(std::ostream& os, int maxorder=-1) const;
@@ -391,31 +387,31 @@ namespace galsim {
 
         // Create a matrix containing basis values at vector of input points.
         // Output matrix has m(i,j) = jth basis function at ith point
-        static boost::shared_ptr<tmv::Matrix<double> > basis(
-            const tmv::ConstVectorView<double>& x, const tmv::ConstVectorView<double>& y,
+        static shared_ptr<MatrixXd> basis(
+            const VectorXd& x, const VectorXd& y,
             int order, double sigma=1.);
 
         // Create design matrix, including factors of 1/sigma stored in invsig
-        static boost::shared_ptr<tmv::Matrix<double> > design(
-            const tmv::ConstVectorView<double>& x, const tmv::ConstVectorView<double>& y,
-            const tmv::ConstVectorView<double>& invsig, int order, double sigma=1.);
+        static shared_ptr<MatrixXd> design(
+            const VectorXd& x, const VectorXd& y,
+            const VectorXd& invsig, int order, double sigma=1.);
 
         // ...or provide your own matrix
         static void design(
-            const tmv::ConstVectorView<double>& x, const tmv::ConstVectorView<double>& y,
-            const tmv::ConstVectorView<double>& invsig,
-            tmv::MatrixView<double> psi, int order, double sigma=1.);
+            const VectorXd& x, const VectorXd& y,
+            const VectorXd& invsig,
+            MatrixXd& psi, int order, double sigma=1.);
 
         static void basis(
-            const tmv::ConstVectorView<double>& x, const tmv::ConstVectorView<double>& y,
-            tmv::MatrixView<double> psi, int order, double sigma=1.);
+            const VectorXd& x, const VectorXd& y,
+            MatrixXd& psi, int order, double sigma=1.);
 
-        static boost::shared_ptr<tmv::Matrix<std::complex<double> > > kBasis(
-            const tmv::ConstVectorView<double>& kx, const tmv::ConstVectorView<double>& ky,
+        static shared_ptr<MatrixXcd> kBasis(
+            const VectorXd& kx, const VectorXd& ky,
             int order, double sigma);
         static void kBasis(
-            const tmv::ConstVectorView<double>& kx, const tmv::ConstVectorView<double>& ky,
-            tmv::MatrixView<std::complex<double> > psi_k, int order, double sigma);
+            const VectorXd& kx, const VectorXd& ky,
+            MatrixXcd& psi_k, int order, double sigma);
 
         // ?? Add routine to decompose a data vector into b's
         // ?? Add routines to evaluate summed basis at a set of x/k points
@@ -424,196 +420,32 @@ namespace galsim {
 
         // Transformations of coefficient LVectors representing real objects:
         // Rotate represented object by theta:
-        // (note this is faster than using RotationLTransform)
-        void rotate(const Angle& theta);
+        void rotate(double theta);
 
         // Get the total flux or flux within an aperture of size R*sigma
         // Use all monopole terms unless maximum is specified by maxP.
         double flux(int maxP=-1) const;
         double apertureFlux(double R, int maxP=-1) const;
 
-#if 0
-        // Return reference to a matrix that generates ???realPsi transformations
-        // under infinitesimal point transforms (translate, dilate, shear).
-        // Returned matrix is at least as large as needed to go order x (order+2)
-        // The choices for generators:
-        enum GType { iX = 0, iY, iMu, iE1, iE2, iRot, nGen };
-        static const tmv::ConstMatrixView<double> Generator(
-            GType iparam, int orderOut, int orderIn);
-#endif
-
-        boost::shared_ptr<double> getOwner() const { return _owner; }
-
     private:
-        // real vs fourier is set by the type of psi.
-        // For real, T = double
-        // For fourier, T = std::complex<double>
-        template <typename T>
-        static void mBasis(
-            const tmv::ConstVectorView<double>& x, const tmv::ConstVectorView<double>& y,
-            const tmv::ConstVectorView<double>* invsig,
-            tmv::MatrixView<T> psi, int order, double sigma=1.);
 
         void allocateMem()
         {
             int s = PQIndex::size(_order);
-            _v.reset(new tmv::Vector<double>(s));
-            _owner.reset(_v->ptr(), LVectorDeleter(_v));
+            _v.reset(new VectorXd(s));
         }
 
         int _order;
-        boost::shared_ptr<tmv::Vector<double> > _v;
-        boost::shared_ptr<double> _owner;
+        shared_ptr<VectorXd> _v;
     };
 
     std::ostream& operator<<(std::ostream& os, const LVector& lv);
     std::istream& operator>>(std::istream& is, LVector& lv);
 
-#if 0
-    // To allow iteration over all the generators:
-    inline LVector::GType& operator++(LVector::GType& g) { return g=LVector::GType(g+1); }
-#endif
-
     // This function finds the innermost radius at which the integrated flux
     // of the LVector's shape crosses the specified threshold, using the first
     // maxP monopole terms (or all, if maxP omitted)
     extern double fluxRadius(const LVector& lv, double threshold, int maxP=-1);
-
-
-    // NB. The LTransform class is not currently used by anything in GalSim.
-    //     Plus, there are not even any implemenations of the MakeLTransform functions below.
-#if 0
- 
-    //--------------------------------------------------------------
-    //
-    // Next class is a transformation matrix for Laguerre vector.  Internal 
-    // storage is as a matrix over the real degrees of freedom.
-    // Interface gives you the (complex) matrix elements of  pqIndex pairs.
-
-    // Again this is a HANDLE, so it can be passed into
-    // subroutines without referencing.  Copy/assignment create a new link; 
-    // for fresh copy, use copy() method.
-    class LTransform 
-    {
-    public:
-        LTransform(int orderOut, int orderIn) : 
-            _orderIn(orderIn), _orderOut(orderOut), 
-            _m(new tmv::Matrix<double>(PQIndex::size(orderOut),PQIndex::size(orderIn),0.))
-        {}
-
-        // Build an LTransform from a tmv::Matrix<double> for the real degrees of freedom.
-        // Matrix must have correct dimensions.
-        LTransform(int orderOut, int orderIn, const tmv::GenMatrix<double>& m) :
-            _orderIn(orderIn), _orderOut(orderOut),
-            _m(new tmv::Matrix<double>(m))
-        {
-            assert(m.ncols() == PQIndex::size(orderIn));
-            assert(m.nrows() == PQIndex::size(orderOut));
-        }
-
-        LTransform(int orderOut, int orderIn, boost::shared_ptr<tmv::Matrix<double> > m) :
-            _orderIn(orderIn), _orderOut(orderOut), _m(m)
-        {
-            assert(m->ncols() == PQIndex::size(orderIn));
-            assert(m->nrows() == PQIndex::size(orderOut));
-        }
-
-        LTransform(const LTransform& rhs) : 
-            _orderIn(rhs._orderIn), _orderOut(rhs._orderOut), _m(rhs._m) {}
-
-        LTransform& operator=(const LTransform& rhs) 
-        {
-            if (_m.get()==rhs._m.get()) return *this;
-            _orderIn=rhs._orderIn; _orderOut=rhs._orderOut; _m = rhs._m; 
-            return *this;
-        }
-
-        ~LTransform() {}
-
-        LTransform copy() const 
-        {
-            LTransform fresh(_orderOut, _orderIn); 
-            *(fresh._m) = *_m;
-            return fresh;
-        }
-
-        int getOrderIn() const { return _orderIn; }
-        int getOrderOut() const { return _orderOut; }
-        int sizeIn() const { return _m->ncols(); }
-        int sizeOut() const { return _m->nrows(); }
-
-        void resize(int orderOut, int orderIn) 
-        {
-            if (_orderIn != orderIn || _orderOut != orderOut) {
-                _orderIn = orderIn;
-                _orderOut = orderOut;
-                _m.reset(new tmv::Matrix<double>(
-                        PQIndex::size(orderOut), PQIndex::size(orderIn), 0.));
-            } else {
-                take_ownership();
-            }
-        }
-
-        // As above, we use take_ownership() to implement Copy on Write semantics.
-        void take_ownership() 
-        { if (!_m.unique()) { _m.reset(new tmv::Matrix<double>(*_m)); } }
-
-        void clear() { take_ownership(); _m->setZero(); }
-        void identity() { take_ownership(); _m->setToIdentity(); }
-
-        // Access the real-representation vector directly.
-        tmv::Matrix<double>& rMatrix() { take_ownership(); return *_m; }
-        const tmv::Matrix<double>& rMatrix() const { return *_m; }
-
-        // Element read
-        std::complex<double> operator()(PQIndex pq1, PQIndex pq2) const;
-        std::complex<double> operator()(int p1, int q1, int p2, int q2) const 
-        { return operator()(PQIndex(p1,q1),PQIndex(p2,q2)); }
-
-        // Element write.  Note that it is necessary to give two complex
-        // simultaneously to allow writing the real version of the matrix:
-        void set(
-            PQIndex pq1, PQIndex pq2,
-            std::complex<double> Cpq1pq2, std::complex<double> Cqp1pq2);
-
-        // Operate on other Laguerre vectors/matrices
-        LVector operator*(const LVector rhs) const;
-        LTransform operator*(const LTransform rhs) const;
-        LTransform& operator*=(const LTransform rhs);
-
-    private:
-        int _orderIn;
-        int _orderOut;
-        boost::shared_ptr<tmv::Matrix<double> > _m;
-    };
-
-    // Here are the primary types of transformations:
-    // For the point transforms, set coordShift=false if we want
-    // to transform the FLUX on a fixed coordinate grid.  Set true
-    // if want to describe the same flux on a transformed COORD system.
-
-    // Shear:
-    LTransform MakeLTransform(
-        CppShear eta, int orderOut, int orderIn, bool coordShift=false);
-
-    // Dilation:
-    LTransform MakeLTransform(
-        double mu, int orderOut, int orderIn, bool coordShift=false);
-
-    // Translation:
-    LTransform MakeLTransform(
-        Position<double> x0, int orderOut, int orderIn, bool coordShift=false);
-
-    // Rotation:
-    LTransform RotationLTransform(
-        double theta, int orderOut, int orderIn, bool coordShift=false);
-
-    // Convolution with PSF:
-    LTransform MakeLTransform(
-        const LVector psf, const double D,
-        const int orderOut, const int orderIn, const int orderStar);
-
-#endif // LTransform section
 
 }
 

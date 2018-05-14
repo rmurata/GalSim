@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -33,9 +33,9 @@ namespace galsim {
         template <typename T>
         SBInterpolatedImageImpl(
             const BaseImage<T>& image,
-            boost::shared_ptr<Interpolant2d> xInterp,
-            boost::shared_ptr<Interpolant2d> kInterp,
-            double pad_factor, double stepk, double maxk, const GSParamsPtr& gsparams);
+            const Bounds<int>& init_bounds, const Bounds<int>& nonzero_bounds,
+            const Interpolant& xInterp, const Interpolant& kInterp,
+            double stepk, double maxk, const GSParams& gsparams);
 
         ~SBInterpolatedImageImpl();
 
@@ -45,16 +45,17 @@ namespace galsim {
         double xValue(const Position<double>& p) const;
         std::complex<double> kValue(const Position<double>& p) const;
 
-        void fillXValue(tmv::MatrixView<double> val,
+        // Only the izero, jzero one can be improved, so override that one.
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, int izero,
                         double y0, double dy, int jzero) const;
-        void fillXValue(tmv::MatrixView<double> val,
-                        double x0, double dx, double dxy,
-                        double y0, double dy, double dyx) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
 
@@ -69,7 +70,8 @@ namespace galsim {
         bool isAnalyticX() const { return true; }
         bool isAnalyticK() const { return true; }
         Position<double> centroid() const;
-        double getFlux() const { return _flux; }
+        double getFlux() const;
+        double maxSB() const;
 
         /**
          *
@@ -90,11 +92,10 @@ namespace galsim {
          *
          * Photon shooting with the Sinc kernel is a bad idea and is currently forbidden.
          *
-         * @param[in] N Total umber of photons to produce.
-         * @param[in] u UniformDeviate that will be used to draw photons from distribution.
-         * @returns PhotonArray containing all the photons' info.
+         * @param[in] photons PhotonArray in which to write the photon information
+         * @param[in] ud UniformDeviate that will be used to draw photons from distribution.
          */
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate u) const;
+        void shoot(PhotonArray& photons, UniformDeviate ud) const;
 
         void getXRange(double& xmin, double& xmax, std::vector<double>& ) const;
         void getYRange(double& ymin, double& ymax, std::vector<double>& ) const;
@@ -106,10 +107,11 @@ namespace galsim {
         //////////////////////////////
         // Additional subclass methods
 
-        boost::shared_ptr<Interpolant> getXInterp() const;
-        boost::shared_ptr<Interpolant> getKInterp() const;
-        ConstImageView<double> getImage() const;
+        const Interpolant& getXInterp() const;
+        const Interpolant& getKInterp() const;
         ConstImageView<double> getPaddedImage() const;
+        ConstImageView<double> getNonZeroImage() const;
+        ConstImageView<double> getImage() const;
 
         void calculateMaxK(double max_stepk) const;
         void calculateStepK(double max_maxk) const;
@@ -118,19 +120,20 @@ namespace galsim {
 
     private:
 
-        int _Ninitial, _Ninitx, _Ninity;
         int _Nk;
+        Bounds<int> _image_bounds;
         Bounds<int> _init_bounds;
-        double _xcentroid;
-        double _ycentroid;
+        Bounds<int> _nonzero_bounds;
 
-        boost::shared_ptr<Interpolant2d> _xInterp; ///< Interpolant used in real space.
-        boost::shared_ptr<Interpolant2d> _kInterp; ///< Interpolant used in k space.
-        boost::shared_ptr<XTable> _xtab; ///< Final padded real-space image.
-        mutable boost::shared_ptr<KTable> _ktab; ///< Final k-space image.
+        InterpolantXY _xInterp; ///< Interpolant used in real space.
+        InterpolantXY _kInterp; ///< Interpolant used in k space.
+        shared_ptr<XTable> _xtab; ///< Final real-space image.
+        mutable shared_ptr<KTable> _ktab; ///< Final k-space image.
         mutable double _stepk;
         mutable double _maxk;
-        double _flux;
+        mutable double _flux;
+        mutable double _xcentroid;
+        mutable double _ycentroid;
 
         double _maxk1; ///< maxk based just on the xInterp urange
         double _uscale; ///< conversion from k to u for xInterpolant
@@ -166,6 +169,31 @@ namespace galsim {
 
     private:
 
+        void doFillXImage(ImageView<double> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillXImage(ImageView<float> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
+
         // Copy constructor and op= are undefined.
         SBInterpolatedImageImpl(const SBInterpolatedImageImpl& rhs);
         void operator=(const SBInterpolatedImageImpl& rhs);
@@ -178,19 +206,13 @@ namespace galsim {
 
         template <typename T>
         SBInterpolatedKImageImpl(
-            const BaseImage<T>& realKImage,
-            const BaseImage<T>& imagKImage,
-            double dk, double stepk,
-            boost::shared_ptr<Interpolant2d> kInterp,
-            const GSParamsPtr& gsparams);
+            const BaseImage<T>& kimage, double stepk,
+            const Interpolant& kInterp, const GSParams& gsparams);
 
         // Alternative constructor used for serialization
         SBInterpolatedKImageImpl(
-            const BaseImage<double>& data,
-            double dk, double stepk, double maxk,
-            boost::shared_ptr<Interpolant2d> kInterp,
-            double xcen, double ycen, bool cenIsSet,
-            const GSParamsPtr& gsparams);
+            const BaseImage<double>& data, double stepk, double maxk,
+            const Interpolant& kInterp, const GSParams& gsparams);
 
         ~SBInterpolatedKImageImpl();
 
@@ -200,14 +222,8 @@ namespace galsim {
         double xValue(const Position<double>& p) const
         { throw SBError("SBInterpolatedKImage::xValue() is not implemented"); }
         std::complex<double> kValue(const Position<double>& p) const;
-        // void fillKValue(tmv::MatrixView<std::complex<double> > val,
-        //                 double kx0, double dkx, int izero,
-        //                 double ky0, double dky, int jzero) const;
-        // void fillKValue(tmv::MatrixView<std::complex<double> > val,
-        //                 double kx0, double dkx, double dkxy,
-        //                 double ky0, double dky, double dkyx) const;
 
-        boost::shared_ptr<Interpolant> getKInterp() const;
+        const Interpolant& getKInterp() const;
 
         double maxK() const { return _maxk; }
         double stepK() const { return _stepk; }
@@ -219,9 +235,11 @@ namespace galsim {
         // a table.  We do not currently implement xValue for real-space interpolation.
         bool isAnalyticX() const { return false; }
         bool isAnalyticK() const { return true; }
+        void setCentroid() const;
         Position<double> centroid() const;
         double getFlux() const { return _flux; }
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate u) const
+        double maxSB() const;
+        void shoot(PhotonArray& photons, UniformDeviate ud) const
         { throw SBError("SBInterpolatedKImage::shoot() is not implemented"); }
 
 
@@ -229,8 +247,6 @@ namespace galsim {
         // Additional subclass methods
 
         ConstImageView<double> getKData() const;
-        double dK() const {return _dk;}
-        bool cenIsSet() const {return _cenIsSet;}
 
     protected:
 
@@ -239,14 +255,11 @@ namespace galsim {
         mutable double _xcentroid;
         mutable double _ycentroid;
 
-        boost::shared_ptr<Interpolant2d> _kInterp; ///< Interpolant used in k space.
-        boost::shared_ptr<KTable> _ktab; ///< Final k-space image.
+        InterpolantXY _kInterp; ///< Interpolant used in k space.
+        shared_ptr<KTable> _ktab; ///< Final k-space image.
         double _stepk; ///< Stored value of stepK
         double _maxk; ///< Stored value of maxK
         double _flux;
-
-        double _dk; ///< Pitch of stored KTable
-        mutable bool _cenIsSet;
 
         std::string serialize() const;
 

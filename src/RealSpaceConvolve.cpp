@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -29,24 +29,18 @@
 #include <sys/time.h>
 #endif
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-std::ostream* dbgout = new std::ofstream("debug.out");
-int verbose_level = 2;
-#endif
-
 #include <numeric>
 
 namespace galsim {
 
-    class ConvolveFunc : 
+    class ConvolveFunc :
         public std::binary_function<double,double,double>
     {
     public:
         ConvolveFunc(const SBProfile& p1, const SBProfile& p2, const Position<double>& pos) :
             _p1(p1), _p2(p2), _pos(pos) {}
 
-        double operator()(double x, double y) const 
+        double operator()(double x, double y) const
         {
             xdbg<<"Convolve function for pos = "<<_pos<<" at x,y = "<<x<<','<<y<<std::endl;
             double v1 = _p1.xValue(Position<double>(x,y));
@@ -87,7 +81,8 @@ namespace galsim {
             xxdbg<<"Y region for x = "<<x<<" = "<<ymin<<" ... "<<ymax<<std::endl;
             if (ymax < ymin) ymax = ymin;
 #ifdef DEBUGLOGGING
-            std::ostream* integ_dbgout = verbose_level >= 3 ? dbgout : 0;
+            std::ostream* integ_dbgout = Debugger::instance().do_level(3) ?
+                &Debugger::instance().get_dbgout() : 0;
             integ::IntRegion<double> reg(ymin,ymax,integ_dbgout);
 #else
             integ::IntRegion<double> reg(ymin,ymax);
@@ -110,21 +105,21 @@ namespace galsim {
     };
 
     // This class finds the overlap between the ymin/ymax values of two profiles.
-    // For overlaps of one profile's min with the other's max, this informs how to 
+    // For overlaps of one profile's min with the other's max, this informs how to
     // adjust the xmin/xmax values to avoid the region where the integral is trivially 0.
-    // This is important, because the abrupt shift from a bunch of 0's to not is 
+    // This is important, because the abrupt shift from a bunch of 0's to not is
     // hard for the integrator.  So it helps to figure this out in advance.
-    // The other use of this it to see where the two ymin's or the two ymax's cross 
-    // each other.  This also leads to an abrupt bend in the function being integrated, so 
+    // The other use of this it to see where the two ymin's or the two ymax's cross
+    // each other.  This also leads to an abrupt bend in the function being integrated, so
     // it's easier if we put a split point there at the start.
-    // The four cases are distinguished by a "mode" variable.  
+    // The four cases are distinguished by a "mode" variable.
     // mode = 1 and 2 are for finding where the ranges are disjoint.
     // mode = 3 and 4 are for finding the bends.
     struct OverlapFinder
     {
         OverlapFinder(const SBProfile& p1, const SBProfile& p2, const Position<double>& pos,
                       int mode) :
-            _p1(p1), _p2(p2), _pos(pos), _mode(mode) 
+            _p1(p1), _p2(p2), _pos(pos), _mode(mode)
         { assert(_mode >= 1 && _mode <= 4); }
         double operator()(double x) const
         {
@@ -136,7 +131,7 @@ namespace galsim {
             ymin2 = _pos.y - ymin2;
             ymax2 = _pos.y - ymax2;
             std::swap(ymin2,ymax2);
-            return 
+            return
                 _mode == 1 ? ymax2 - ymin1 :
                 _mode == 2 ? ymax1 - ymin2 :
                 _mode == 3 ? ymax2 - ymax1 :
@@ -153,7 +148,7 @@ namespace galsim {
 
     // We pull out this segment, since we do it twice.  Once with which = true, and once
     // with which = false.
-    static void UpdateXRange(const OverlapFinder& func, double& xmin, double& xmax, 
+    static void UpdateXRange(const OverlapFinder& func, double& xmin, double& xmax,
                              const std::vector<double>& splits)
     {
         xdbg<<"Start UpdateXRange given xmin,xmax = "<<xmin<<','<<xmax<<std::endl;
@@ -207,7 +202,7 @@ namespace galsim {
         }
     }
 
-    static void AddSplitsAtBends(const OverlapFinder& func, double xmin, double xmax, 
+    static void AddSplitsAtBends(const OverlapFinder& func, double xmin, double xmax,
                                  std::vector<double>& splits)
     {
         xdbg<<"Start AddSplitsAtBends given xmin,xmax = "<<xmin<<','<<xmax<<std::endl;
@@ -259,7 +254,7 @@ namespace galsim {
 
     double RealSpaceConvolve(
         const SBProfile& p1, const SBProfile& p2, const Position<double>& pos, double flux,
-        const GSParamsPtr& gsparams)
+        const GSParams& gsparams)
     {
         // Coming in, if only one of them is axisymmetric, it should be p1.
         // This cuts down on some of the logic below.
@@ -268,18 +263,18 @@ namespace galsim {
         // so I didn't bother, since I don't think we'll be doing that too often.
         // So p2 is always taken to be a rectangle rather than possibly a circle.
         assert(p1.isAxisymmetric() || !p2.isAxisymmetric());
-        
-        xdbg<<"Start RealSpaceConvolve for pos = "<<pos<<std::endl;
+
+        dbg<<"Start RealSpaceConvolve for pos = "<<pos<<std::endl;
         double xmin1, xmax1, xmin2, xmax2;
         std::vector<double> xsplits1, xsplits2;
         p1.getXRange(xmin1,xmax1,xsplits1);
         p2.getXRange(xmin2,xmax2,xsplits2);
-        xdbg<<"p1 X range = "<<xmin1<<"  "<<xmax1<<std::endl;
-        xdbg<<"p2 X range = "<<xmin2<<"  "<<xmax2<<std::endl;
+        dbg<<"p1 X range = "<<xmin1<<"  "<<xmax1<<std::endl;
+        dbg<<"p2 X range = "<<xmin2<<"  "<<xmax2<<std::endl;
 
         // Check for early exit
         if (pos.x < xmin1 + xmin2 || pos.x > xmax1 + xmax2) {
-            xdbg<<"x is outside range, so trivially 0\n";
+            dbg<<"x is outside range, so trivially 0\n";
             return 0;
         }
 
@@ -287,11 +282,11 @@ namespace galsim {
         std::vector<double> ysplits1, ysplits2;
         p1.getYRange(ymin1,ymax1,ysplits1);
         p2.getYRange(ymin2,ymax2,ysplits2);
-        xdbg<<"p1 Y range = "<<ymin1<<"  "<<ymax1<<std::endl;
-        xdbg<<"p2 Y range = "<<ymin2<<"  "<<ymax2<<std::endl;
+        dbg<<"p1 Y range = "<<ymin1<<"  "<<ymax1<<std::endl;
+        dbg<<"p2 Y range = "<<ymin2<<"  "<<ymax2<<std::endl;
         // Second check for early exit
         if (pos.y < ymin1 + ymin2 || pos.y > ymax1 + ymax2) {
-            xdbg<<"y is outside range, so trivially 0\n";
+            dbg<<"y is outside range, so trivially 0\n";
             return 0;
         }
 
@@ -327,9 +322,9 @@ namespace galsim {
             UpdateXRange(func2,xmin,xmax,xsplits);
 
             // Third check for early exit
-            if (xmin >= xmax) { 
+            if (xmin >= xmax) {
                 xdbg<<"p1 and p2 are disjoint, so trivially 0\n";
-                return 0.; 
+                return 0.;
             }
 
             // Also check for where the two tops or the two bottoms might cross.
@@ -345,10 +340,11 @@ namespace galsim {
         ConvolveFunc conv(p1,p2,pos);
 
 #ifdef DEBUGLOGGING
-        std::ostream* integ_dbgout = verbose_level >= 3 ? dbgout : 0;
+        std::ostream* integ_dbgout = Debugger::instance().do_level(3) ?
+            &Debugger::instance().get_dbgout() : 0;
         integ::IntRegion<double> xreg(xmin,xmax,integ_dbgout);
-        if (dbgout && verbose_level >= 3) xreg.useFXMap();
-        xdbg<<"xreg = "<<xmin<<" ... "<<xmax<<std::endl;
+        if (integ_dbgout) xreg.useFXMap();
+        dbg<<"xreg = "<<xmin<<" ... "<<xmax<<std::endl;
 #else
         integ::IntRegion<double> xreg(xmin,xmax);
 #endif
@@ -368,17 +364,17 @@ namespace galsim {
         double t1 = tp.tv_sec + tp.tv_usec/1.e6;
 #endif
 
-        double result = integ::int2d(conv, xreg, yreg, 
-                                     gsparams->realspace_relerr,
-                                     gsparams->realspace_abserr * flux);
+        double result = integ::int2d(conv, xreg, yreg,
+                                     gsparams.realspace_relerr,
+                                     gsparams.realspace_abserr * flux);
 
 #ifdef TIMING
         gettimeofday(&tp,0);
         double t2 = tp.tv_sec + tp.tv_usec/1.e6;
-        xdbg<<"Time for ("<<pos.x<<','<<pos.y<<") = "<<t2-t1<<std::endl;
+        dbg<<"Time for ("<<pos.x<<','<<pos.y<<") = "<<t2-t1<<std::endl;
 #endif
 
-        xdbg<<"Found result = "<<result<<std::endl;
+        dbg<<"Found result = "<<result<<std::endl;
         return result;
     }
 

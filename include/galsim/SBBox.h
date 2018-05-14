@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -19,7 +19,7 @@
 
 #ifndef GalSim_SBBox_H
 #define GalSim_SBBox_H
-/** 
+/**
  * @file SBBox.h @brief SBProfile of a 2-d tophat profile.
  */
 
@@ -27,18 +27,18 @@
 
 namespace galsim {
 
-    /** 
+    /**
      * @brief Surface Brightness Profile for the Boxcar function.
      *
      * The boxcar function is a rectangular box.  Convolution with a Boxcar function of dimensions
      * `width` x `height` and sampling at pixel centres is equivalent to pixelation (i.e. Surface
      * Brightness integration) across rectangular pixels of the same dimensions.  This class is
      * therefore useful for pixelating SBProfiles.
-     */ 
-    class SBBox : public SBProfile 
+     */
+    class SBBox : public SBProfile
     {
     public:
-        /** 
+        /**
          * @brief Constructor.
          *
          * @param[in] width    width of Boxcar function along x.
@@ -47,7 +47,7 @@ namespace galsim {
          * @param[in] gsparams GSParams object storing constants that control the accuracy of image
          *                     operations and rendering, if different from the default.
          */
-        SBBox(double width, double height, double flux, const GSParamsPtr& gsparams);
+        SBBox(double width, double height, double flux, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBBox(const SBBox& rhs);
@@ -70,16 +70,16 @@ namespace galsim {
         void operator=(const SBBox& rhs);
     };
 
-    /** 
+    /**
      * @brief Surface Brightness Profile for the TopHat function.
      *
      * The tophat function is much like the boxcar, but a circular plateau, rather than
      * a rectangle.  It is defined by a radius and a flux.
-     */ 
-    class SBTopHat : public SBProfile 
+     */
+    class SBTopHat : public SBProfile
     {
     public:
-        /** 
+        /**
          * @brief Constructor.
          *
          * @param[in] radius    radius of TopHat function
@@ -87,7 +87,7 @@ namespace galsim {
          * @param[in] gsparams  GSParams object storing constants that control the accuracy of
          *                      image operations and rendering, if different from the default.
          */
-        SBTopHat(double radius, double flux, const GSParamsPtr& gsparams);
+        SBTopHat(double radius, double flux, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBTopHat(const SBTopHat& rhs);

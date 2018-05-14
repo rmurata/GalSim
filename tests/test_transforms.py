@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -15,26 +15,23 @@
 #    this list of conditions, and the disclaimer given in the documentation
 #    and/or other materials provided with the distribution.
 #
+
+from __future__ import print_function
 import numpy as np
 import os
 import sys
 
+import galsim
 from galsim_test_helpers import *
 
 imgdir = os.path.join(".", "SBProfile_comparison_images") # Directory containing the reference
-                                                          # images. 
+                                                          # images.
 
-try:
-    import galsim
-except ImportError:
-    path, filename = os.path.split(__file__)
-    sys.path.append(os.path.abspath(os.path.join(path, "..")))
-    import galsim
 
 # for flux normalization tests
 test_flux = 1.8
 
-# These are the default GSParams used when unspecified.  We'll check that specifying 
+# These are the default GSParams used when unspecified.  We'll check that specifying
 # these explicitly produces the same results.
 default_params = galsim.GSParams(
         minimum_fft_size = 128,
@@ -60,11 +57,10 @@ delta_sub = 30
 image_decimal_precise = 15
 
 
+@timer
 def test_smallshear():
-    """Test the application of a small shear to a Gaussian SBProfile against a known result.
+    """Test the application of a small shear to a Gaussian profile against a known result.
     """
-    import time
-    t1 = time.time()
     e1 = 0.02
     e2 = 0.02
     myShear = galsim.Shear(e1=e1, e2=e2)
@@ -79,7 +75,10 @@ def test_smallshear():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear disagrees with expected result")
- 
+    np.testing.assert_almost_equal(
+            myImg.array.max(), gauss2.max_sb, 5,
+            err_msg="sheared profile max_sb did not match maximum pixel value")
+
     # Check with default_params
     gauss = galsim.Gaussian(flux=1, sigma=1, gsparams=default_params)
     gauss = gauss.shear(myShear)
@@ -88,12 +87,14 @@ def test_smallshear():
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear with default_params disagrees with expected result")
     gauss = galsim.Gaussian(flux=1, sigma=1, gsparams=galsim.GSParams())
-    gauss = gauss.shear(myShear)
+    gauss = gauss._shear(myShear)
     gauss.drawImage(myImg,scale=dx, method="sb", use_true_center=False)
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear with GSParams() disagrees with expected result")
- 
+
+    check_basic(gauss, "sheared Gaussian")
+
     # Test photon shooting.
     do_shoot(gauss,myImg,"sheared Gaussian")
 
@@ -101,25 +102,20 @@ def test_smallshear():
     do_kvalue(gauss,myImg,"sheared Gaussian")
 
     # Check picklability
-    do_pickle(gauss.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(gauss, lambda x: x.drawImage())
     do_pickle(gauss)
-    do_pickle(gauss.SBProfile)
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
+    # Check really small shear  (This mostly tests a branch in the str function.)
+    do_pickle(galsim.Gaussian(sigma=2.3).shear(g1=1.e-13,g2=0))
 
-
+@timer
 def test_largeshear():
-    """Test the application of a large shear to a Sersic SBProfile against a known result.
+    """Test the application of a large shear to a Sersic profile against a known result.
     """
-    import time
-    t1 = time.time()
     e1 = 0.0
     e2 = 0.5
 
     myShear = galsim.Shear(e1=e1, e2=e2)
-    # test the SBProfile version using shear
     savedImg = galsim.fits.read(os.path.join(imgdir, "sersic_largeshear.fits"))
     dx = 0.2
     myImg = galsim.ImageF(savedImg.bounds, scale=dx)
@@ -131,6 +127,9 @@ def test_largeshear():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear disagrees with expected result")
+    np.testing.assert_almost_equal(
+            myImg.array.max(), devauc2.max_sb, 5,
+            err_msg="sheared profile max_sb did not match maximum pixel value")
 
     # Check with default_params
     devauc = galsim.DeVaucouleurs(flux=1, half_light_radius=1, gsparams=default_params)
@@ -140,40 +139,35 @@ def test_largeshear():
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear with default_params disagrees with expected result")
     devauc = galsim.DeVaucouleurs(flux=1, half_light_radius=1, gsparams=galsim.GSParams())
-    devauc = devauc.shear(myShear)
+    devauc = devauc._shear(myShear)
     devauc.drawImage(myImg,scale=dx, method="sb", use_true_center=False)
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shear with GSParams() disagrees with expected result")
- 
-    # Test photon shooting.
+
     # Convolve with a small gaussian to smooth out the central peak.
     devauc2 = galsim.Convolve(devauc, galsim.Gaussian(sigma=0.3))
+    check_basic(devauc2, "sheared DeVauc")
+
+    # Test photon shooting.
     do_shoot(devauc2,myImg,"sheared DeVauc")
 
     # Test kvalues.
-    # Testing a sheared devauc requires a rather large fft.  What we really care about 
+    # Testing a sheared devauc requires a rather large fft.  What we really care about
     # testing though is the accuracy of the shear function.  So just shear a Gaussian here.
     gauss = galsim.Gaussian(sigma=2.3)
     gauss = gauss.shear(myShear)
     do_kvalue(gauss,myImg, "sheared Gaussian")
 
     # Check picklability
-    do_pickle(gauss.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(gauss, lambda x: x.drawImage())
     do_pickle(gauss)
-    do_pickle(gauss.SBProfile)
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
- 
-
+@timer
 def test_rotate():
     """Test the 45 degree rotation of a sheared Sersic profile against a known result.
     """
-    import time
-    t1 = time.time()
     myShear = galsim.Shear(e1=0.2, e2=0.0)
     savedImg = galsim.fits.read(os.path.join(imgdir, "sersic_ellip_rotated.fits"))
     dx = 0.2
@@ -186,6 +180,9 @@ def test_rotate():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject rotate disagrees with expected result")
+    np.testing.assert_almost_equal(
+            myImg.array.max(), gal.max_sb, 5,
+            err_msg="rotated profile max_sb did not match maximum pixel value")
 
     # Check with default_params
     gal = galsim.Sersic(n=2.5, flux=1, half_light_radius=1, gsparams=default_params)
@@ -196,35 +193,31 @@ def test_rotate():
             err_msg="Using GSObject rotate with default_params disagrees with expected "
             "result")
     gal = galsim.Sersic(n=2.5, flux=1, half_light_radius=1, gsparams=galsim.GSParams())
-    gal = gal.shear(myShear).rotate(45.0 * galsim.degrees)
+    gal = gal._shear(myShear).rotate(45.0 * galsim.degrees)
     gal.drawImage(myImg,scale=dx, method="sb", use_true_center=False)
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject rotate with GSParams() disagrees with expected result")
- 
-    # Test photon shooting.
+
     # Convolve with a small gaussian to smooth out the central peak.
     gal2 = galsim.Convolve(gal, galsim.Gaussian(sigma=0.3))
+    check_basic(gal2, "rotated sheared Sersic")
+
+    # Test photon shooting.
     do_shoot(gal2,myImg,"rotated sheared Sersic")
 
     # Test kvalues
     do_kvalue(gal,myImg,"rotated sheared Sersic")
 
     # Check picklability
-    do_pickle(gal.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(gal, lambda x: x.drawImage())
     do_pickle(gal)
-    do_pickle(gal.SBProfile)
-
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
 
+@timer
 def test_mag():
     """Test the magnification (size x 1.5) of an exponential profile against a known result.
     """
-    import time
-    t1 = time.time()
     re = 1.0
     r0 = re/1.67839
     savedImg = galsim.fits.read(os.path.join(imgdir, "exp_mag.fits"))
@@ -240,7 +233,10 @@ def test_mag():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject dilate disagrees with expected result")
- 
+    np.testing.assert_almost_equal(
+            myImg.array.max(), gal.max_sb, 5,
+            err_msg="dilated profile max_sb did not match maximum pixel value")
+
     # Check with default_params
     gal = galsim.Exponential(flux=1, scale_radius=r0, gsparams=default_params)
     gal = gal.dilate(1.5)
@@ -267,6 +263,9 @@ def test_mag():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject magnify disagrees with expected result")
+    np.testing.assert_almost_equal(
+            myImg.array.max(), gal.max_sb, 5,
+            err_msg="magnified profile max_sb did not match maximum pixel value")
 
     # Use lens
     gal = galsim.Exponential(flux=1, scale_radius=r0)
@@ -276,29 +275,29 @@ def test_mag():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject lens disagrees with expected result")
+    np.testing.assert_almost_equal(
+            myImg.array.max(), gal.max_sb, 5,
+            err_msg="lensed profile max_sb did not match maximum pixel value")
 
-    # Test photon shooting.
     gal = galsim.Exponential(flux=1, scale_radius=r0)
     gal = gal.magnify(1.5**2) # area rescaling factor
+    check_basic(gal, "dilated Exponential")
+
+    # Test photon shooting.
     do_shoot(gal,myImg,"dilated Exponential")
 
     # Test kvalues
     do_kvalue(gal,myImg,"dilated Exponential")
 
     # Check picklability
-    do_pickle(gal.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(gal, lambda x: x.drawImage())
     do_pickle(gal)
-    do_pickle(gal.SBProfile)
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
+@timer
 def test_lens():
     """Test the lensing (shear, magnification) of a Sersic profile carried out 2 ways.
     """
-    import time
-    t1 = time.time()
     re = 1.0
     n = 3.
     g1 = 0.12
@@ -316,15 +315,11 @@ def test_lens():
     np.testing.assert_array_almost_equal(im.array, im2.array, 5,
         err_msg="Lensing of Sersic profile done in two different ways gives different answer")
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
-
+@timer
 def test_shift():
     """Test the translation of a Box profile against a known result.
     """
-    import time
-    t1 = time.time()
     dx = 0.2
     savedImg = galsim.fits.read(os.path.join(imgdir, "box_shift.fits"))
     myImg = galsim.ImageF(savedImg.bounds, scale=dx)
@@ -336,7 +331,10 @@ def test_shift():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shift disagrees with expected result")
- 
+    np.testing.assert_almost_equal(
+            myImg.array.max(), pixel.max_sb, 5,
+            err_msg="shifted profile max_sb did not match maximum pixel value")
+
     # Check with default_params
     pixel = galsim.Pixel(scale=dx, gsparams=default_params)
     pixel = pixel.shift(dx, -dx)
@@ -350,32 +348,28 @@ def test_shift():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject shift with GSParams() disagrees with expected result")
- 
+
+    check_basic(pixel, "shifted Box")
+
     # Test photon shooting.
     do_shoot(pixel,myImg,"shifted Box")
 
     # Test kvalues.
-    # Testing a shifted box requires a ridiculously large fft.  What we really care about 
+    # Testing a shifted box requires a ridiculously large fft.  What we really care about
     # testing though is the accuracy of the shift function.  So just shift a Gaussian here.
     gauss = galsim.Gaussian(sigma=2.3)
     gauss = gauss.shift(dx,-dx)
     do_kvalue(gauss,myImg, "shifted Gaussian")
 
     # Check picklability
-    do_pickle(gauss.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(gauss, lambda x: x.drawImage())
     do_pickle(gauss)
-    do_pickle(gauss.SBProfile)
-
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
 
+@timer
 def test_rescale():
     """Test the flux rescaling of a Sersic profile against a known result.
     """
-    import time
-    t1 = time.time()
     savedImg = galsim.fits.read(os.path.join(imgdir, "sersic_doubleflux.fits"))
     dx = 0.2
     myImg = galsim.ImageF(savedImg.bounds, scale=dx)
@@ -386,6 +380,10 @@ def test_rescale():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject withFlux disagrees with expected result")
+    np.testing.assert_almost_equal(
+            myImg.array.max(), sersic.withFlux(2).max_sb, 5,
+            err_msg="rescaled profile max_sb did not match maximum pixel value")
+
     sersic = galsim.Sersic(n=3, flux=1, half_light_radius=1)
     sersic *= 2
     sersic.drawImage(myImg,scale=dx, method="sb", use_true_center=False)
@@ -417,7 +415,7 @@ def test_rescale():
     np.testing.assert_array_almost_equal(
             myImg.array, savedImg.array, 5,
             err_msg="Using GSObject *= 2 with GSParams() disagrees with expected result")
- 
+
     # Can also get a flux of 2 by drawing flux=1 twice with add_to_image=True
     sersic = galsim.Sersic(n=3, flux=1, half_light_radius=1)
     sersic.drawImage(myImg,scale=dx, method="sb", use_true_center=False)
@@ -427,18 +425,18 @@ def test_rescale():
             myImg.array, savedImg.array, 5,
             err_msg="Drawing with add_to_image=True disagrees with expected result")
 
-    # With lower folding_threshold and maxk_threshold, the calculated flux should come out right 
+    # With lower folding_threshold and maxk_threshold, the calculated flux should come out right
     # so long as we also convolve by a pixel:
     gsp1 = galsim.GSParams(folding_threshold=1.e-3, maxk_threshold=5.e-4)
     sersic_acc = galsim.Sersic(n=3, flux=1, half_light_radius=1, gsparams=gsp1)
     myImg2 = sersic_acc.drawImage(scale=dx, use_true_center=False)
-    print myImg2.array.sum(), myImg2.added_flux
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum(), 1., 3,
             err_msg="Drawing with gsp1 results in wrong flux")
     np.testing.assert_almost_equal(myImg2.added_flux, 1., 3,
             err_msg="Drawing with gsp1 returned wrong added_flux")
     myImg2 = sersic_acc.drawImage(myImg2, add_to_image=True, use_true_center=False)
-    print myImg2.array.sum(), myImg2.added_flux
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum(), 2., 3,
             err_msg="Drawing with add_to_image=True results in wrong flux")
     np.testing.assert_almost_equal(myImg2.added_flux, 1., 3,
@@ -449,21 +447,21 @@ def test_rescale():
     gsp2 = galsim.GSParams(folding_threshold=1.e-5, maxk_threshold=1.e-5)
     gauss = galsim.Gaussian(flux=1.e5, sigma=2., gsparams=gsp2)
     myImg2 = gauss.drawImage(scale=dx, use_true_center=False)
-    print 'image size = ',myImg2.array.shape
-    print myImg2.array.sum(), myImg2.added_flux
+    print('image size = ',myImg2.array.shape)
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum()/1.e5, 1., 4,
             err_msg="Drawing Gaussian results in wrong flux")
     np.testing.assert_almost_equal(myImg2.added_flux/1.e5, 1., 4,
             err_msg="Drawing Gaussian returns wrong added_flux")
     myImg2 = gauss.drawImage(myImg2, add_to_image=True, use_true_center=False)
-    print myImg2.array.sum(), myImg2.added_flux
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum()/1.e5, 2., 4,
             err_msg="Drawing Gaussian with add_to_image=True results in wrong flux")
     np.testing.assert_almost_equal(myImg2.added_flux/1.e5, 1., 4,
             err_msg="Drawing Gaussian with add_to_image=True returns wrong added_flux")
     rng = galsim.BaseDeviate(12345)
     myImg2 = gauss.drawImage(myImg2, add_to_image=True, poisson_flux=False, rng=rng, method='phot')
-    print myImg2.array.sum(), myImg2.added_flux
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum()/1.e5, 3., 4,
             err_msg="Drawing Gaussian with method=phot, add_to_image=True, poisson_flux=False "+
                     "results in wrong flux")
@@ -471,7 +469,7 @@ def test_rescale():
             err_msg="Drawing Gaussian with method=phot, add_to_image=True, poisson_flux=False "+
                     "returned wrong added_flux")
     myImg2 = gauss.drawImage(myImg2, add_to_image=True, rng=rng, method='phot')
-    print myImg2.array.sum(), myImg2.added_flux
+    print(myImg2.array.sum(), myImg2.added_flux)
     np.testing.assert_almost_equal(myImg2.array.sum()/1.e5, 4., 1,
             err_msg="Drawing Gaussian with method=phot, add_to_image=True, poisson_flux=True "+
                     "results in wrong flux")
@@ -497,35 +495,31 @@ def test_rescale():
     sersic_acc.drawImage(myImg2, gain=4., add_to_image=True, use_true_center=False)
     np.testing.assert_almost_equal(myImg2.array.sum(), 0.5, 3,
             err_msg="Drawing with gain=4. results in wrong flux")
- 
-    # Test photon shooting.
+
     # Convolve with a small gaussian to smooth out the central peak.
     sersic_smooth = galsim.Convolve(sersic2, galsim.Gaussian(sigma=0.3))
+    check_basic(sersic_smooth, "scaled Sersic")
+
+    # Test photon shooting.
     do_shoot(sersic_smooth,myImg,"scaled Sersic")
 
     # Test kvalues
     do_kvalue(sersic2,myImg, "scaled Sersic")
 
     # Check picklability
-    do_pickle(sersic2.SBProfile, lambda x: (x.getJac().tolist(), x.getOffset(), x.getFluxScaling()))
     do_pickle(sersic2, lambda x: x.drawImage())
     do_pickle(sersic2)
-    do_pickle(sersic2.SBProfile)
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
+@timer
 def test_integer_shift_fft():
     """Test if shift works correctly for integer shifts using drawImage method.
     """
-    import time
-    t1 = time.time()
-
     gal = galsim.Gaussian(sigma=test_sigma)
     psf = galsim.Airy(lam_over_diam=test_hlr)
 
     # shift galaxy only
- 
+
     final=galsim.Convolve([gal, psf])
     img_center = galsim.ImageD(n_pix_x,n_pix_y)
     final.drawImage(img_center,scale=1)
@@ -536,11 +530,11 @@ def test_integer_shift_fft():
     final.drawImage(img_shift,scale=1)
 
     sub_center = img_center.array[
-        (n_pix_y - delta_sub) / 2 : (n_pix_y + delta_sub) / 2,
-        (n_pix_x - delta_sub) / 2 : (n_pix_x + delta_sub) / 2]
+        (n_pix_y - delta_sub) // 2 : (n_pix_y + delta_sub) // 2,
+        (n_pix_x - delta_sub) // 2 : (n_pix_x + delta_sub) // 2]
     sub_shift = img_shift.array[
-        (n_pix_y - delta_sub) / 2  + int_shift_y : (n_pix_y + delta_sub) / 2  + int_shift_y,
-        (n_pix_x - delta_sub) / 2  + int_shift_x : (n_pix_x + delta_sub) / 2  + int_shift_x]
+        (n_pix_y - delta_sub) // 2  + int_shift_y : (n_pix_y + delta_sub) // 2  + int_shift_y,
+        (n_pix_x - delta_sub) // 2  + int_shift_x : (n_pix_x + delta_sub) // 2  + int_shift_x]
 
     np.testing.assert_array_almost_equal(
         sub_center, sub_shift, decimal=image_decimal_precise,
@@ -555,24 +549,20 @@ def test_integer_shift_fft():
     final.drawImage(img_shift,scale=1)
 
     sub_center = img_center.array[
-        (n_pix_y - delta_sub) / 2 : (n_pix_y + delta_sub) / 2,
-        (n_pix_x - delta_sub) / 2 : (n_pix_x + delta_sub) / 2]
+        (n_pix_y - delta_sub) // 2 : (n_pix_y + delta_sub) // 2,
+        (n_pix_x - delta_sub) // 2 : (n_pix_x + delta_sub) // 2]
     sub_shift = img_shift.array[
-        (n_pix_y - delta_sub) / 2  + int_shift_y : (n_pix_y + delta_sub) / 2  + int_shift_y,
-        (n_pix_x - delta_sub) / 2  + int_shift_x : (n_pix_x + delta_sub) / 2  + int_shift_x]
+        (n_pix_y - delta_sub) // 2  + int_shift_y : (n_pix_y + delta_sub) // 2  + int_shift_y,
+        (n_pix_x - delta_sub) // 2  + int_shift_x : (n_pix_x + delta_sub) // 2  + int_shift_x]
     np.testing.assert_array_almost_equal(
         sub_center, sub_shift,  decimal=image_decimal_precise,
         err_msg="Integer shift failed for FFT rendered Gaussian GSObject with only PSF shifted ")
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
+@timer
 def test_integer_shift_photon():
     """Test if shift works correctly for integer shifts using method=phot.
     """
-    import time
-    t1 = time.time()
-
     n_photons_low = 10
     seed = 10
 
@@ -580,7 +570,7 @@ def test_integer_shift_photon():
     psf = galsim.Airy(lam_over_diam=test_hlr)
 
     # shift galaxy only
- 
+
     final=galsim.Convolve([gal, psf])
     img_center = galsim.ImageD(n_pix_x,n_pix_y)
     test_deviate = galsim.BaseDeviate(seed)
@@ -591,13 +581,13 @@ def test_integer_shift_photon():
     img_shift = galsim.ImageD(n_pix_x,n_pix_y)
     test_deviate = galsim.BaseDeviate(seed)
     final.drawImage(img_shift,scale=1,rng=test_deviate,n_photons=n_photons_low, method='phot')
-    
+
     sub_center = img_center.array[
-        (n_pix_y - delta_sub) / 2 : (n_pix_y + delta_sub) / 2,
-        (n_pix_x - delta_sub) / 2 : (n_pix_x + delta_sub) / 2]
+        (n_pix_y - delta_sub) // 2 : (n_pix_y + delta_sub) // 2,
+        (n_pix_x - delta_sub) // 2 : (n_pix_x + delta_sub) // 2]
     sub_shift = img_shift.array[
-        (n_pix_y - delta_sub) / 2  + int_shift_y : (n_pix_y + delta_sub) / 2  + int_shift_y,
-        (n_pix_x - delta_sub) / 2  + int_shift_x : (n_pix_x + delta_sub) / 2  + int_shift_x]
+        (n_pix_y - delta_sub) // 2  + int_shift_y : (n_pix_y + delta_sub) // 2  + int_shift_y,
+        (n_pix_x - delta_sub) // 2  + int_shift_x : (n_pix_x + delta_sub) // 2  + int_shift_x]
 
 
     np.testing.assert_array_almost_equal(
@@ -614,24 +604,20 @@ def test_integer_shift_photon():
     final.drawImage(img_shift,scale=1,rng=test_deviate,n_photons=n_photons_low, method='phot')
 
     sub_center = img_center.array[
-        (n_pix_y - delta_sub) / 2 : (n_pix_y + delta_sub) / 2,
-        (n_pix_x - delta_sub) / 2 : (n_pix_x + delta_sub) / 2]
+        (n_pix_y - delta_sub) // 2 : (n_pix_y + delta_sub) // 2,
+        (n_pix_x - delta_sub) // 2 : (n_pix_x + delta_sub) // 2]
     sub_shift = img_shift.array[
-        (n_pix_y - delta_sub) / 2  + int_shift_y : (n_pix_y + delta_sub) / 2  + int_shift_y,
-        (n_pix_x - delta_sub) / 2  + int_shift_x : (n_pix_x + delta_sub) / 2  + int_shift_x]
+        (n_pix_y - delta_sub) // 2  + int_shift_y : (n_pix_y + delta_sub) // 2  + int_shift_y,
+        (n_pix_x - delta_sub) // 2  + int_shift_x : (n_pix_x + delta_sub) // 2  + int_shift_x]
     np.testing.assert_array_almost_equal(
         sub_center, sub_shift,  decimal=image_decimal_precise,
         err_msg="Integer shift failed for FFT rendered Gaussian GSObject with only PSF shifted ")
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
+@timer
 def test_flip():
     """Test several ways to flip a profile
     """
-    import time
-    t1 = time.time()
-
     # The Shapelet profile has the advantage of being fast and not circularly symmetric, so
     # it is a good test of the actual code for doing the flips (in SBTransform).
     # But since the bug Rachel reported in #645 was actually in SBInterpolatedImage
@@ -643,8 +629,8 @@ def test_flip():
     ]
     if __name__ == "__main__":
         image_dir = './real_comparison_images'
-        catalog_file = os.path.join(image_dir,'test_catalog.fits')
-        rgc = galsim.RealGalaxyCatalog(catalog_file, image_dir)
+        catalog_file = 'test_catalog.fits'
+        rgc = galsim.RealGalaxyCatalog(catalog_file, dir=image_dir)
         # Some of these are slow, so only do the Shapelet test as part of the normal unit tests.
         prof_list += [
             galsim.Airy(lam_over_diam=0.17, flux=1.7),
@@ -679,6 +665,8 @@ def test_flip():
             galsim.Convolve([ galsim.RealGalaxy(rgc, index=1, flux=1.7),  # "Fake" RealGalaxy
                               galsim.Gaussian(sigma=0.08) ]),             # (cf. test_real.py)
             galsim.Spergel(nu=-0.19, half_light_radius=0.17, flux=1.7),
+            galsim.Spergel(nu=0., half_light_radius=0.17, flux=1.7),
+            galsim.Spergel(nu=0.8, half_light_radius=0.17, flux=1.7),
             galsim.Sersic(n=2.3, half_light_radius=0.17, flux=1.7),
             galsim.Sersic(n=2.3, half_light_radius=0.17, flux=1.7, trunc=0.82),
             # The shifts here caught a bug in how SBTransform handled the recentering.
@@ -703,7 +691,7 @@ def test_flip():
                 (galsim.AutoCorrelate(galsim.Box(0.2, 0.3)) * 11).shift(3,2).shift(2,-3) * 0.31
             ]).shift(0,0).transform(0,-1,-1,0).shift(-1,1)
         ]
-     
+
     s = galsim.Shear(g1=0.11, g2=-0.21)
     s1 = galsim.Shear(g1=0.11, g2=0.21)  # Appropriate for the flips around x and y axes
     s2 = galsim.Shear(g1=-0.11, g2=-0.21)  # Appropriate for the flip around x=y
@@ -715,13 +703,21 @@ def test_flip():
 
     decimal=6  # Oddly, these aren't as precise as I would have expected.
                # Even when we only go to this many digits of accuracy, the Exponential needed
-               # a lower than default value for maxk_threshold. 
+               # a lower than default value for maxk_threshold.
     im = galsim.ImageD(16,16, scale=0.05)
 
     for prof in prof_list:
-        print 'prof = ',prof
+        print('prof = ',prof)
 
-        # Make sure we hit all 4 fill functions.  
+        # Not all profiles are expected to have a max_sb value close to the maximum pixel value,
+        # so mark the ones where we don't want to require this to be true.
+        close_maxsb = True
+        name = str(prof)
+        if ('DeVauc' in name or 'Sersic' in name or 'Spergel' in name or
+            'Optical' in name or 'shift' in name):
+            close_maxsb = False
+
+        # Make sure we hit all 4 fill functions.
         # image_x uses fillXValue with izero, jzero
         # image_x1 uses fillXValue with izero, jzero, and unequal dx,dy
         # image_x2 uses fillXValue with dxy, dyx
@@ -734,6 +730,17 @@ def test_flip():
         image_k = prof.drawImage(image=im.copy())
         image_k1 = prof.shear(q).drawImage(image=im.copy())
         image_k2 = prof.shear(s).drawImage(image=im.copy())
+
+        if close_maxsb:
+            np.testing.assert_allclose(
+                    image_x.array.max(), prof.max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image_x1.array.max(), prof.shear(q).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image_x2.array.max(), prof.shear(s).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
 
         # Flip around y axis (i.e. x -> -x)
         flip1 = prof.transform(-1, 0, 0, 1)
@@ -762,6 +769,17 @@ def test_flip():
             image_k2.array, image2_k2.array[:,::-1], decimal=decimal,
             err_msg="Flipping image around y-axis failed k2 test")
 
+        if close_maxsb:
+            np.testing.assert_allclose(
+                    image2_x.array.max(), flip1.max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x1.array.max(), flip1.shear(q).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x2.array.max(), flip1.shear(s).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+
         # Flip around x axis (i.e. y -> -y)
         flip2 = prof.transform(1, 0, 0, -1)
         image2_x = flip2.drawImage(image=im.copy(), method='no_pixel')
@@ -788,6 +806,17 @@ def test_flip():
         np.testing.assert_array_almost_equal(
             image_k2.array, image2_k2.array[::-1,:], decimal=decimal,
             err_msg="Flipping image around x-axis failed k2 test")
+
+        if close_maxsb:
+            np.testing.assert_allclose(
+                    image2_x.array.max(), flip2.max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x1.array.max(), flip2.shear(q).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x2.array.max(), flip2.shear(s).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
 
         # Flip around x=y (i.e. y -> x, x -> y)
         flip3 = prof.transform(0, 1, 1, 0)
@@ -816,6 +845,17 @@ def test_flip():
             image_k2.array, np.transpose(image2_k2.array), decimal=decimal,
             err_msg="Flipping image around x=y failed k2 test")
 
+        if close_maxsb:
+            np.testing.assert_allclose(
+                    image2_x.array.max(), flip3.max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x1.array.max(), flip3.shear(q).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+            np.testing.assert_allclose(
+                    image2_x2.array.max(), flip3.shear(s).max_sb*im.scale**2, rtol=0.2,
+                    err_msg="max_sb did not match maximum pixel value")
+
         do_pickle(prof, lambda x: x.drawImage(image=im.copy(), method='no_pixel'))
         do_pickle(flip1, lambda x: x.drawImage(image=im.copy(), method='no_pixel'))
         do_pickle(flip2, lambda x: x.drawImage(image=im.copy(), method='no_pixel'))
@@ -825,9 +865,100 @@ def test_flip():
         do_pickle(flip2)
         do_pickle(flip3)
 
-    t2 = time.time()
-    print 'time for %s = %.2f'%(funcname(),t2-t1)
 
+@timer
+def test_ne():
+    """ Check that inequality works as expected."""
+    gal1 = galsim.Gaussian(fwhm=1)
+    gal2 = galsim.Gaussian(fwhm=2)
+    gsp = galsim.GSParams(maxk_threshold=1.1e-3, folding_threshold=5.1e-3)
+
+    # Transforms using the callables below will produce galsim.ChromaticTransformation objects
+    # instead of galsim.Transformation objects, but they should still compare unequal so we go ahead
+    # and test them too.
+    jac = lambda w: [[w, 0], [0, 1]]
+    offset = lambda w: (0, w)
+    flux_ratio = lambda w: w
+
+    objs = [galsim.Transform(gal1),
+            galsim.Transform(gal2),
+            galsim.Transform(gal1, jac=(1, 0.5, 0.5, 1)),
+            galsim.Transform(gal1, jac=jac),
+            galsim.Transform(gal1, offset=galsim.PositionD(2, 2)),
+            galsim.Transform(gal1, offset=offset),
+            galsim.Transform(gal1, flux_ratio=1.1),
+            galsim.Transform(gal1, flux_ratio=flux_ratio),
+            galsim.Transform(gal1, gsparams=gsp)]
+    all_obj_diff(objs)
+
+@timer
+def test_compound():
+    """Check that transformations of transformations work the same whether they are compounded
+    automatically or not.
+    """
+    gal1 = galsim.Gaussian(fwhm=1.7, flux=2.3)
+    gal2 = gal1.shear(g1=0.21, g2=0.12).rotate(33 * galsim.degrees).shift(0.1,0.4) * 1.1
+    gal3 = gal2.shear(g1=0.18, g2=0.09).rotate(12 * galsim.degrees).shift(-0.3,0.5) * 8.9
+    # These should have compounded automatically into a single transformation
+    print('gal3 = ',gal3)
+    print('gal3.original = ',gal3.original)
+    assert gal3.original == gal1
+
+    gal4 = gal2 + 0. * gal1  # Equivalent to gal2, but the sum kills the automatic compounding.
+    gal5 = gal4.shear(g1=0.18, g2=0.09).rotate(12 * galsim.degrees).shift(-0.3,0.5) * 8.9
+    print('gal5 = ',gal5)
+    print('gal5.original = ',gal5.original)
+    assert gal5.original != gal1
+    assert gal5.original == gal4
+
+    # Despite that, the gal3 and gal5 should draw the same in both real and k-space
+    im3_d = galsim.ImageD(8,8)
+    im5_d = galsim.ImageD(8,8)
+    im3_f = galsim.ImageF(8,8)
+    im5_f = galsim.ImageF(8,8)
+    im3_cd = galsim.ImageCD(8,8)
+    im5_cd = galsim.ImageCD(8,8)
+    im3_cf = galsim.ImageCF(8,8)
+    im5_cf = galsim.ImageCF(8,8)
+
+    # Note: these are not equal.  gal5 lost track of the overall transformation and thinks it
+    # needs a bit larger maxk, smaller stepk.  ~10% different.
+    print('gal3.stepk = ',gal3.stepk)
+    print('gal5.stepk = ',gal5.stepk)
+    print('gal3.maxk = ',gal3.maxk)
+    print('gal5.maxk = ',gal5.maxk)
+
+    gal3.drawImage(image=im3_d, method='sb', scale=0.2)
+    gal5.drawImage(image=im5_d, method='sb', scale=0.2)
+    np.testing.assert_almost_equal(im3_d[1,1], gal3.xValue(-0.7,-0.7), decimal=12)
+    np.testing.assert_almost_equal(im5_d[1,1], gal3.xValue(-0.7,-0.7), decimal=12)
+    np.testing.assert_almost_equal(im3_d.array[0,0], gal3.xValue(-0.7,-0.7), decimal=12)
+    np.testing.assert_almost_equal(im5_d.array[0,0], gal3.xValue(-0.7,-0.7), decimal=12)
+    np.testing.assert_array_almost_equal(im3_d.array, im5_d.array, decimal=12)
+
+    gal3.drawImage(image=im3_f, method='sb', scale=0.2)
+    gal5.drawImage(image=im5_f, method='sb', scale=0.2)
+    np.testing.assert_almost_equal(im3_f[1,1], gal3.xValue(-0.7,-0.7), decimal=4)
+    np.testing.assert_almost_equal(im5_f[1,1], gal3.xValue(-0.7,-0.7), decimal=4)
+    np.testing.assert_almost_equal(im3_f.array, im5_f.array, decimal=4)
+    np.testing.assert_almost_equal(im3_f.array, im3_d.array, decimal=4)
+    np.testing.assert_almost_equal(im5_f.array, im5_d.array, decimal=4)
+
+    gal3.drawKImage(image=im3_cd, scale=0.5)
+    gal5.drawKImage(image=im5_cd, scale=0.5)
+    np.testing.assert_almost_equal(im3_cd[-4,-4], gal3.kValue(-2.,-2.), decimal=12)
+    np.testing.assert_almost_equal(im5_cd[-4,-4], gal3.kValue(-2.,-2.), decimal=12)
+    np.testing.assert_almost_equal(im3_cd.array[0,0], gal3.kValue(-2.,-2.), decimal=12)
+    np.testing.assert_almost_equal(im5_cd.array[0,0], gal3.kValue(-2.,-2.), decimal=12)
+    np.testing.assert_array_almost_equal(im3_cd.array, im5_cd.array, decimal=12)
+
+    gal3.drawKImage(image=im3_cf, scale=0.5)
+    gal5.drawKImage(image=im5_cf, scale=0.5)
+    np.testing.assert_almost_equal(im3_cf[-4,-4], gal3.kValue(-2.,-2.), decimal=3)
+    np.testing.assert_almost_equal(im5_cf[-4,-4], gal3.kValue(-2.,-2.), decimal=3)
+    np.testing.assert_array_almost_equal(im3_cf.array, im5_cf.array, decimal=3)
+    np.testing.assert_array_almost_equal(im3_cf.array, im3_cd.array, decimal=3)
+    np.testing.assert_array_almost_equal(im5_cf.array, im5_cd.array, decimal=3)
 
 if __name__ == "__main__":
     test_smallshear()
@@ -840,3 +971,5 @@ if __name__ == "__main__":
     test_integer_shift_fft()
     test_integer_shift_photon()
     test_flip()
+    test_ne()
+    test_compound()

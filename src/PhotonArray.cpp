@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -26,32 +26,71 @@
 #include <numeric>
 #include "PhotonArray.h"
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-//std::ostream* dbgout = new std::ofstream("debug.out");
-//int verbose_level = 2;
-#endif
-
 namespace galsim {
 
-    PhotonArray::PhotonArray(
-        std::vector<double>& vx, std::vector<double>& vy, std::vector<double>& vflux) :
-        _is_correlated(false)
+    template <typename T>
+    struct ArrayDeleter {
+        void operator()(T* p) const { delete [] p; }
+    };
+
+    PhotonArray::PhotonArray(int N) : 
+        _N(N), _dxdz(0), _dydz(0), _wave(0), _is_correlated(false), _vx(N), _vy(N), _vflux(N)
     {
-        if (vx.size() != vy.size() || vx.size() != vflux.size())
-            throw std::runtime_error("Size mismatch of input vectors to PhotonArray");
-        _x = vx;
-        _y = vy;
-        _flux = vflux;
+        _x = &_vx[0];
+        _y = &_vy[0];
+        _flux = &_vflux[0];
     }
 
-    double PhotonArray::getTotalFlux() const 
+    template <typename T>
+    struct AddImagePhotons
+    {
+        AddImagePhotons(double* x, double* y, double* f,
+                        double maxFlux, UniformDeviate ud) :
+            _x(x), _y(y), _f(f), _maxFlux(maxFlux), _ud(ud), _count(0) {}
+
+        void operator()(T flux, int i, int j)
+        {
+            int N = (flux <= _maxFlux) ? 1 : int(std::ceil(flux / _maxFlux));
+            double fluxPer = double(flux) / N;
+            for (int k=0; k<N; ++k) {
+                double x = i + _ud() - 0.5;
+                double y = j + _ud() - 0.5;
+                _x[_count] = x;
+                _y[_count] = y;
+                _f[_count] = fluxPer;
+                ++_count;
+            }
+        }
+
+        int getCount() const { return _count; }
+
+        double* _x;
+        double* _y;
+        double* _f;
+        const double _maxFlux;
+        UniformDeviate _ud;
+        int _count;
+    };
+
+    template <class T>
+    int PhotonArray::setFrom(const BaseImage<T>& image, double maxFlux, UniformDeviate ud)
+    {
+        dbg<<"bounds = "<<image.getBounds()<<std::endl;
+        dbg<<"flux, maxflux = "<<_flux<<','<<maxFlux<<std::endl;
+        AddImagePhotons<T> adder(_x, _y, _flux, maxFlux, ud);
+        for_each_pixel_ij_ref(image, adder);
+        dbg<<"Done: size = "<<adder.getCount()<<std::endl;
+        _N = adder.getCount();
+        return _N;
+    }
+
+    double PhotonArray::getTotalFlux() const
     {
         double total = 0.;
-        return std::accumulate(_flux.begin(), _flux.end(), total);
+        return std::accumulate(_flux, _flux+_N, total);
     }
 
-    void PhotonArray::setTotalFlux(double flux) 
+    void PhotonArray::setTotalFlux(double flux)
     {
         double oldFlux = getTotalFlux();
         if (oldFlux==0.) return; // Do nothing if the flux is zero to start with
@@ -60,75 +99,74 @@ namespace galsim {
 
     void PhotonArray::scaleFlux(double scale)
     {
-        for (std::vector<double>::size_type i=0; i<_flux.size(); i++) {
-            _flux[i] *= scale;
-        }
+        std::transform(_flux, _flux+_N, _flux,
+                       std::bind2nd(std::multiplies<double>(),scale));
     }
 
     void PhotonArray::scaleXY(double scale)
     {
-        for (std::vector<double>::size_type i=0; i<_x.size(); i++) {
-            _x[i] *= scale;
-        }
-        for (std::vector<double>::size_type i=0; i<_y.size(); i++) {
-            _y[i] *= scale;
-        }
+        std::transform(_x, _x+_N, _x,
+                       std::bind2nd(std::multiplies<double>(),scale));
+        std::transform(_y, _y+_N, _y,
+                       std::bind2nd(std::multiplies<double>(),scale));
     }
 
-    void PhotonArray::append(const PhotonArray& rhs) 
+    void PhotonArray::assignAt(int istart, const PhotonArray& rhs)
     {
-        if (rhs.size()==0) return;      // Nothing needed for empty RHS.
-        int oldSize = size();
-        int finalSize = oldSize + rhs.size();
-        _x.resize(finalSize);
-        _y.resize(finalSize);
-        _flux.resize(finalSize);
-        std::vector<double>::iterator destination=_x.begin()+oldSize;
-        std::copy(rhs._x.begin(), rhs._x.end(), destination);
-        destination=_y.begin()+oldSize;
-        std::copy(rhs._y.begin(), rhs._y.end(), destination);
-        destination=_flux.begin()+oldSize;
-        std::copy(rhs._flux.begin(), rhs._flux.end(), destination);
+        if (istart + rhs.size() > size())
+            throw std::runtime_error("Trying to assign past the end of PhotonArray");
+
+        const int N2 = rhs.size();
+        std::copy(rhs._x, rhs._x+N2, _x+istart);
+        std::copy(rhs._y, rhs._y+N2, _y+istart);
+        std::copy(rhs._flux, rhs._flux+N2, _flux+istart);
+        if (hasAllocatedAngles() && rhs.hasAllocatedAngles()) {
+            std::copy(rhs._dxdz, rhs._dxdz+N2, _dxdz+istart);
+            std::copy(rhs._dydz, rhs._dydz+N2, _dydz+istart);
+        }
+        if (hasAllocatedWavelengths() && rhs.hasAllocatedWavelengths()) {
+            std::copy(rhs._wave, rhs._wave+N2, _wave+istart);
+        }
     }
 
-    void PhotonArray::convolve(const PhotonArray& rhs, UniformDeviate ud) 
+    // Helper for multiplying x * y * N
+    struct MultXYScale
+    {
+        MultXYScale(double scale) : _scale(scale) {}
+        double operator()(double x, double y) { return x * y * _scale; }
+        double _scale;
+    };
+
+    void PhotonArray::convolve(const PhotonArray& rhs, UniformDeviate ud)
     {
         // If both arrays have correlated photons, then we need to shuffle the photons
         // as we convolve them.
         if (_is_correlated && rhs._is_correlated) return convolveShuffle(rhs,ud);
 
         // If neither or only one is correlated, we are ok to just use them in order.
-        int N = size();
-        if (rhs.size() != N) 
+        if (rhs.size() != size())
             throw std::runtime_error("PhotonArray::convolve with unequal size arrays");
         // Add x coordinates:
-        std::vector<double>::iterator lIter = _x.begin();
-        std::vector<double>::const_iterator rIter = rhs._x.begin();
-        for ( ; lIter!=_x.end(); ++lIter, ++rIter) *lIter += *rIter;
+        std::transform(_x, _x+_N, rhs._x, _x, std::plus<double>());
         // Add y coordinates:
-        lIter = _y.begin();
-        rIter = rhs._y.begin();
-        for ( ; lIter!=_y.end(); ++lIter, ++rIter) *lIter += *rIter;
+        std::transform(_y, _y+_N, rhs._y, _y, std::plus<double>());
         // Multiply fluxes, with a factor of N needed:
-        lIter = _flux.begin();
-        rIter = rhs._flux.begin();
-        for ( ; lIter!=_flux.end(); ++lIter, ++rIter) *lIter *= *rIter*N;
+        std::transform(_flux, _flux+_N, rhs._flux, _flux, MultXYScale(_N));
 
         // If rhs was correlated, then the output will be correlated.
         // This is ok, but we need to mark it as such.
         if (rhs._is_correlated) _is_correlated = true;
     }
 
-    void PhotonArray::convolveShuffle(const PhotonArray& rhs, UniformDeviate ud) 
+    void PhotonArray::convolveShuffle(const PhotonArray& rhs, UniformDeviate ud)
     {
-        int N = size();
-        if (rhs.size() != N) 
+        if (rhs.size() != size())
             throw std::runtime_error("PhotonArray::convolve with unequal size arrays");
         double xSave=0.;
         double ySave=0.;
         double fluxSave=0.;
 
-        for (int iOut = N-1; iOut>=0; iOut--) {
+        for (int iOut = _N-1; iOut>=0; iOut--) {
             // Randomly select an input photon to use at this output
             // NB: don't need floor, since rhs is positive, so floor is superfluous.
             int iIn = int((iOut+1)*ud());
@@ -141,7 +179,7 @@ namespace galsim {
             }
             _x[iOut] = _x[iIn] + rhs._x[iOut];
             _y[iOut] = _y[iIn] + rhs._y[iOut];
-            _flux[iOut] = _flux[iIn] * rhs._flux[iOut] * N;
+            _flux[iOut] = _flux[iIn] * rhs._flux[iOut] * _N;
             if (iIn < iOut) {
                 // Move saved info to new location in array
                 _x[iIn] = xSave;
@@ -151,81 +189,33 @@ namespace galsim {
         }
     }
 
-    void PhotonArray::takeYFrom(const PhotonArray& rhs) 
-    {
-        int N = size();
-        assert(rhs.size()==N);
-        for (int i=0; i<N; i++) {
-            _y[i] = rhs._x[i];
-            _flux[i] *= rhs._flux[i]*N;
-        }
-    }
-
     template <class T>
-    double PhotonArray::addTo(ImageView<T>& target) const 
+    double PhotonArray::addTo(ImageView<T> target) const
     {
+        dbg<<"Start addTo\n";
         Bounds<int> b = target.getBounds();
-
-        if (!b.isDefined()) 
+        dbg<<"bounds = "<<b<<std::endl;
+        if (!b.isDefined())
             throw std::runtime_error("Attempting to PhotonArray::addTo an Image with"
                                      " undefined Bounds");
 
-        // Factor to turn flux into surface brightness in an Image pixel
-        dbg<<"In PhotonArray::addTo\n";
-        dbg<<"bounds = "<<b<<std::endl;
-
         double addedFlux = 0.;
-#ifdef DEBUGLOGGING
-        double totalFlux = 0.;
-        double lostFlux = 0.;
-        int nx = target.getXMax()-target.getXMin()+1;
-        int ny = target.getYMax()-target.getYMin()+1;
-        std::vector<std::vector<double> > posFlux(nx,std::vector<double>(ny,0.));
-        std::vector<std::vector<double> > negFlux(nx,std::vector<double>(ny,0.));
-#endif
         for (int i=0; i<int(size()); i++) {
             int ix = int(floor(_x[i] + 0.5));
             int iy = int(floor(_y[i] + 0.5));
-#ifdef DEBUGLOGGING
-            totalFlux += _flux[i];
-            xdbg<<"  photon: ("<<_x[i]<<','<<_y[i]<<")  f = "<<_flux[i]<<std::endl;
-#endif
             if (b.includes(ix,iy)) {
-#ifdef DEBUGLOGGING
-                if (_flux[i] > 0.) posFlux[ix-target.getXMin()][iy-target.getXMin()] += _flux[i];
-                else negFlux[ix-target.getXMin()][iy-target.getXMin()] -= _flux[i];
-#endif
                 target(ix,iy) += _flux[i];
                 addedFlux += _flux[i];
-            } else {
-#ifdef DEBUGLOGGING
-                xdbg<<"lost flux at ix = "<<ix<<", iy = "<<iy<<" with flux = "<<_flux[i]<<std::endl;
-                lostFlux += _flux[i];
-#endif
             }
         }
-#ifdef DEBUGLOGGING
-        dbg<<"totalFlux = "<<totalFlux<<std::endl;
-        dbg<<"addedlFlux = "<<addedFlux<<std::endl;
-        dbg<<"lostFlux = "<<lostFlux<<std::endl;
-        for(int ix=0;ix<nx;++ix) {
-            for(int iy=0;iy<ny;++iy) {
-                double pos = posFlux[ix][iy];
-                double neg = negFlux[ix][iy];
-                double tot = pos + neg;
-                if (tot > 0.) {
-                    xdbg<<"eta("<<ix+target.getXMin()<<','<<iy+target.getXMin()<<") = "<<
-                        neg<<" / "<<tot<<" = "<<neg/tot<<std::endl;
-                }
-            }
-        }
-#endif
-
         return addedFlux;
     }
 
     // instantiate template functions for expected image types
-    template double PhotonArray::addTo(ImageView<float>& image) const;
-    template double PhotonArray::addTo(ImageView<double>& image) const;
-
+    template double PhotonArray::addTo(ImageView<float> image) const;
+    template double PhotonArray::addTo(ImageView<double> image) const;
+    template int PhotonArray::setFrom(const BaseImage<float>& image, double maxFlux,
+                                      UniformDeviate ud);
+    template int PhotonArray::setFrom(const BaseImage<double>& image, double maxFlux,
+                                      UniformDeviate ud);
 }

@@ -21,10 +21,9 @@
 
 #include "SBSpergelet.h"
 #include "SBSpergeletImpl.h"
-#include <boost/math/special_functions/bessel.hpp>
-#include <boost/math/special_functions/gamma.hpp>
+#include "math/Bessel.h"
+#include "math/Gamma.h"
 #include "Solve.h"
-#include "bessel/Roots.h"
 
 // Define this variable to find azimuth (and sometimes radius within a unit disc) of 2d photons by
 // drawing a uniform deviate for theta, instead of drawing 2 deviates for a point on the unit
@@ -36,16 +35,9 @@
 #define USE_COS_SIN
 #endif
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-//std::ostream* dbgout = new std::ofstream("debug.out");
-//std::ostream* dbgout = &std::cout;
-//int verbose_level = 1;
-#endif
-
 namespace galsim {
 
-    SBSpergelet::SBSpergelet(double nu, double r0, int j, int q, const GSParamsPtr& gsparams) :
+    SBSpergelet::SBSpergelet(double nu, double r0, int j, int q, const GSParams& gsparams) :
         SBProfile(new SBSpergeletImpl(nu, r0, j, q, gsparams)) {}
 
     SBSpergelet::SBSpergelet(const SBSpergelet& rhs) : SBProfile(rhs) {}
@@ -76,24 +68,23 @@ namespace galsim {
         return static_cast<const SBSpergeletImpl&>(*_pimpl).getQ();
     }
 
-    std::string SBSpergelet::SBSpergeletImpl::repr() const
+    std::string SBSpergelet::SBSpergeletImpl::serialize() const
     {
         std::ostringstream oss(" ");
         oss.precision(std::numeric_limits<double>::digits10 + 4);
         oss << "galsim._galsim.SBSpergelet("<<getNu()<<", "<<getScaleRadius();
-        oss << ", " << getJ() << ", " << getQ() << ", galsim.GSParams("<<*gsparams<<"))";
+        oss << ", " << getJ() << ", " << getQ() << ", galsim.GSParams("<<gsparams<<"))";
         return oss.str();
     }
 
-    LRUCache<boost::tuple<double,int,int,GSParamsPtr>,SpergeletInfo>
+    LRUCache<Tuple<double,int,int,GSParamsPtr>,SpergeletInfo>
         SBSpergelet::SBSpergeletImpl::cache(sbp::max_spergelet_cache);
 
-    SBSpergelet::SBSpergeletImpl::SBSpergeletImpl(double nu, double r0,
-                                                  int j, int q,
-                                                  const GSParamsPtr& gsparams) :
+    SBSpergelet::SBSpergeletImpl::SBSpergeletImpl(double nu, double r0, int j, int q,
+                                                  const GSParams& gsparams) :
         SBProfileImpl(gsparams),
         _nu(nu), _r0(r0), _j(j), _q(q),
-        _info(cache.get(boost::make_tuple(_nu, _j, _q, this->gsparams.duplicate())))
+        _info(cache.get(MakeTuple(_nu, _j, _q, GSParamsPtr(this->gsparams))))
     {
         if ((j < 0) or (q < -j) or (q > j))
             throw SBError("Requested Spergelet indices out of range");
@@ -124,55 +115,49 @@ namespace galsim {
     //     return 1.;
     // }
 
-    void SBSpergelet::SBSpergeletImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBSpergelet::SBSpergeletImpl::fillKImage(ImageView<std::complex<T> > im,
                                                   double kx0, double dkx, int izero,
                                                   double ky0, double dky, int jzero) const
     {
         dbg<<"SBSpergelet fillKValue\n";
         dbg<<"kx = "<<kx0<<" + i * "<<dkx<<", izero = "<<izero<<std::endl;
         dbg<<"ky = "<<ky0<<" + i * "<<dky<<", jzero = "<<jzero<<std::endl;
-        // Not sure about quadrant.  Spergelets have different symmetries than most other profiles.
-        // if (izero != 0 || jzero != 0) {
-        //     xdbg<<"Use Quadrant\n";
-        //     fillKValueQuadrant(val,kx0,dkx,izero,ky0,dky,jzero);
-        // } else {
-            xdbg<<"Non-Quadrant\n";
-            assert(val.stepi() == 1);
-            const int m = val.colsize();
-            const int n = val.rowsize();
-            typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
-            kx0 *= _r0;
-            dkx *= _r0;
-            ky0 *= _r0;
-            dky *= _r0;
+        kx0 *= _r0;
+        dkx *= _r0;
+        ky0 *= _r0;
+        dky *= _r0;
 
-            for (int j=0;j<n;++j,ky0+=dky) {
-                double kx = kx0;
-                double kysq = ky0*ky0;
-                //It valit(val.col(j).begin().getP(),1);
-                It valit = val.col(j).begin();
-                for (int i=0;i<m;++i,kx+=dkx) {
-                    double ksq = kx*kx + kysq;
-                    double phi = atan2(ky0, kx);
-                    *valit++ = _info->kValue(ksq, phi);
-                }
+        for (int j=0; j<n; ++j,ky0+=dky,ptr+=skip) {
+            double kx = kx0;
+            double kysq = ky0*ky0;
+            for (int i=0;i<m;++i,kx+=dkx) {
+                double ksq = kx*kx + kysq;
+                double phi = atan2(ky0, kx);
+                *ptr++ = _info->kValue(ksq, phi);
             }
-        // }
+        }
     }
 
-    void SBSpergelet::SBSpergeletImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBSpergelet::SBSpergeletImpl::fillKImage(ImageView<std::complex<T> > im,
                                                   double kx0, double dkx, double dkxy,
                                                   double ky0, double dky, double dkyx) const
     {
         dbg<<"SBSpergelet fillKValue\n";
         dbg<<"x = "<<kx0<<" + i * "<<dkx<<" + j * "<<dkxy<<std::endl;
         dbg<<"y = "<<ky0<<" + i * "<<dkyx<<" + j * "<<dky<<std::endl;
-        assert(val.stepi() == 1);
-        assert(val.canLinearize());
-        const int m = val.colsize();
-        const int n = val.rowsize();
-        typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
         kx0 *= _r0;
         dkx *= _r0;
@@ -181,23 +166,22 @@ namespace galsim {
         dky *= _r0;
         dkyx *= _r0;
 
-        It valit = val.linearView().begin();
-        for (int j=0;j<n;++j,kx0+=dkxy,ky0+=dky) {
+        for (int j=0; j<n; ++j,kx0+=dkxy,ky0+=dky,ptr+=skip) {
             double kx = kx0;
             double ky = ky0;
             for (int i=0;i<m;++i,kx+=dkx,ky+=dkyx) {
                 double ksq = kx*kx + ky*ky;
-                double phi = atan2(ky,kx);
-                *valit++ = _info->kValue(ksq, phi);
+                double phi = atan2(ky, kx);
+                *ptr++ = _info->kValue(ksq, phi);
             }
         }
     }
 
     SpergeletInfo::SpergeletInfo(double nu, int j, int q, const GSParamsPtr& gsparams) :
         _nu(nu), _j(j), _q(q), _gsparams(gsparams),
-        _gamma_nup1(boost::math::tgamma(_nu+1.0)),
+        _gamma_nup1(math::tgamma(_nu+1.0)),
         _gamma_nup2(_gamma_nup1 * (_nu+1.0)),
-        _gamma_nupjp1(boost::math::tgamma(_nu+_j+1.0)),
+        _gamma_nupjp1(math::tgamma(_nu+_j+1.0)),
         _knorm(_gamma_nupjp1/_gamma_nup1),
         _maxk(0.), _stepk(0.)
     {
@@ -219,7 +203,7 @@ namespace galsim {
         // (i.e., make a residual so this can be used to search for a target flux.
         {
             double fnup1 = std::pow(u / 2., _nu+1.)
-                * boost::math::cyl_bessel_k(_nu+1., u)
+                * math::cyl_bessel_k(_nu+1., u)
                 / _gamma_nup2;
             double f = 1.0 - 2.0 * (1.+_nu)*fnup1;
             return f - _target;

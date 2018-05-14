@@ -22,6 +22,7 @@
 
 #include "SBProfileImpl.h"
 #include "SBMoffatlet.h"
+#include "Table.h"
 #include "LRUCache.h"
 
 namespace galsim {
@@ -74,17 +75,17 @@ namespace galsim {
         mutable double _xnorm;   ///< Real space normalization.
 
         // Parameters for the Hankel transform:
-        mutable Table<double,double> _ft; ///< Lookup table for Fourier transform
+        mutable TableBuilder _ft; ///< Lookup table for Fourier transform
 
         // Helper functions used internally:
-        void buildFT() const;
+        void setupFT() const;
         double calculateFluxRadius(const double& flux_frac) const;
     };
 
     class SBMoffatlet::SBMoffatletImpl : public SBProfileImpl
     {
     public:
-        SBMoffatletImpl(double beta, double r0, int j, int q, const GSParamsPtr& gsparams);
+        SBMoffatletImpl(double beta, double r0, int j, int q, const GSParams& gsparams);
 
         ~SBMoffatletImpl() {}
 
@@ -107,6 +108,7 @@ namespace galsim {
 
         double getFlux() const // TODO: This is definitely not true...
         { return 1.0; }
+        double maxSB() const { return _xnorm; }  // XXX: check this.
 
         /// @brief Returns the Moffat index beta
         double getBeta() const { return _beta; }
@@ -118,24 +120,28 @@ namespace galsim {
         int getQ() const {return _q;}
 
         /// @brief Photon-shooting is not implemented for SBMoffatlet, will throw an exception.
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const
+        void shoot(PhotonArray& photons, UniformDeviate ud) const
         { throw SBError("SBMoffatlet::shoot() is not implemented"); }
 
-        std::string repr() const;
-
         // Overrides for better efficiency
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, int izero,
                         double y0, double dy, int jzero) const;
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, double dxy,
                         double y0, double dy, double dyx) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
+
+        std::string serialize() const;
 
     private:
         double _beta;  ///< Moffat index
@@ -148,13 +154,13 @@ namespace galsim {
         double _inv_r0;
         double _inv_r0_sq;
 
-        boost::shared_ptr<MoffatletInfo> _info; ///< Points to info structure for this beta, jq
+        shared_ptr<MoffatletInfo> _info; ///< Points to info structure for this beta, jq
 
         // Copy constructor and op= are undefined.
         SBMoffatletImpl(const SBMoffatletImpl& rhs);
         void operator=(const SBMoffatletImpl& rhs);
 
-        static LRUCache<boost::tuple< double, int, int, GSParamsPtr >, MoffatletInfo> cache;
+        static LRUCache<Tuple< double, int, int, GSParamsPtr >, MoffatletInfo> cache;
     };
 }
 

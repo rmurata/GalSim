@@ -21,10 +21,9 @@
 
 #include "SBMoffatlet.h"
 #include "SBMoffatletImpl.h"
-#include <boost/math/special_functions/bessel.hpp>
-#include <boost/math/special_functions/gamma.hpp>
 #include "Solve.h"
-#include "bessel/Roots.h"
+#include "math/Bessel.h"
+#include "math/Gamma.h"
 
 // Define this variable to find azimuth (and sometimes radius within a unit disc) of 2d photons by
 // drawing a uniform deviate for theta, instead of drawing 2 deviates for a point on the unit
@@ -36,16 +35,10 @@
 #define USE_COS_SIN
 #endif
 
-#ifdef DEBUGLOGGING
-#include <fstream>
-//std::ostream* dbgout = new std::ofstream("debug.out");
-//std::ostream* dbgout = &std::cout;
-//int verbose_level = 1;
-#endif
-
 namespace galsim {
 
-    SBMoffatlet::SBMoffatlet(double beta, double r0, int j, int q, const GSParamsPtr& gsparams) :
+    SBMoffatlet::SBMoffatlet(double beta, double r0, int j, int q,
+                             const GSParams& gsparams) :
         SBProfile(new SBMoffatletImpl(beta, r0, j, q, gsparams)) {}
 
     SBMoffatlet::SBMoffatlet(const SBMoffatlet& rhs) : SBProfile(rhs) {}
@@ -76,24 +69,23 @@ namespace galsim {
         return static_cast<const SBMoffatletImpl&>(*_pimpl).getQ();
     }
 
-    std::string SBMoffatlet::SBMoffatletImpl::repr() const
+    std::string SBMoffatlet::SBMoffatletImpl::serialize() const
     {
         std::ostringstream oss(" ");
         oss.precision(std::numeric_limits<double>::digits10 + 4);
         oss << "galsim._galsim.SBMoffatlet("<<getBeta()<<", "<<getScaleRadius();
-        oss << ", " << getJ() << ", " << getQ() << ", galsim.GSParams("<<*gsparams<<"))";
+        oss << ", " << getJ() << ", " << getQ() << ", galsim.GSParams("<<gsparams<<"))";
         return oss.str();
     }
 
-    LRUCache<boost::tuple<double,int,int,GSParamsPtr>,MoffatletInfo>
+    LRUCache<Tuple<double,int,int,GSParamsPtr>,MoffatletInfo>
         SBMoffatlet::SBMoffatletImpl::cache(sbp::max_moffatlet_cache);
 
-    SBMoffatlet::SBMoffatletImpl::SBMoffatletImpl(double beta, double r0,
-                                                  int j, int q,
-                                                  const GSParamsPtr& gsparams) :
+    SBMoffatlet::SBMoffatletImpl::SBMoffatletImpl(double beta, double r0, int j, int q,
+                                                  const GSParams& gsparams) :
         SBProfileImpl(gsparams),
         _beta(beta), _r0(r0), _j(j), _q(q),
-        _info(cache.get(boost::make_tuple(_beta, _j, _q, this->gsparams.duplicate())))
+        _info(cache.get(MakeTuple(_beta, _j, _q, GSParamsPtr(this->gsparams))))
     {
         if ((j < 0) or (q < -j) or (q > j))
             throw SBError("Requested Moffatlet indices out of range");
@@ -107,7 +99,7 @@ namespace galsim {
         _inv_r0 = 1. / _r0;
         _inv_r0_sq = _inv_r0 * _inv_r0;
         _xnorm = _info->getXNorm() / _r0_sq;
-        //_xnorm = boost::math::tgamma(_beta+_j) / boost::math::tgamma(_beta) / _r0_sq;
+        //_xnorm = math::tgamma(_beta+_j) / math::tgamma(_beta) / _r0_sq;
     }
 
     double SBMoffatlet::SBMoffatletImpl::maxK() const { return _info->maxK() * _inv_r0; }
@@ -127,57 +119,49 @@ namespace galsim {
         return _info->kValue(ksq, phi);
     }
 
-    void SBMoffatlet::SBMoffatletImpl::fillXValue(tmv::MatrixView<double> val,
+    template <typename T>
+    void SBMoffatlet::SBMoffatletImpl::fillXImage(ImageView<T> im,
                                                   double x0, double dx, int izero,
                                                   double y0, double dy, int jzero) const
     {
         dbg<<"SBMoffatlet fillXValue\n";
         dbg<<"x = "<<x0<<" + i * "<<dx<<", izero = "<<izero<<std::endl;
-        dbg<<"y = "<<y0<<" + j * "<<dy<<", jzero = "<<jzero<<std::endl;
-        // Not sure about quadrant.  Moffatlets are sometimes even and sometimes odd.
-        // if (izero != 0 || jzero != 0) {
-        //     xdbg<<"Use Quadrant\n";
-        //     fillXValueQuadrant(val,x0,dx,izero,y0,dy,jzero);
-        //     // Spergels can be super peaky at the center, so handle explicitly like Sersics
-        //     if (izero != 0 && jzero != 0)
-        //         val(izero, jzero) = _xnorm * _info->xValue(0.);
-        // } else {
-            xdbg<<"Non-Quadrant\n";
-            assert(val.stepi() == 1);
-            const int m = val.colsize();
-            const int n = val.rowsize();
-            typedef tmv::VIt<double,1,tmv::NonConj> It;
+        dbg<<"y = "<<y0<<" + i * "<<dy<<", jzero = "<<jzero<<std::endl;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
-            x0 *= _inv_r0;
-            dx *= _inv_r0;
-            y0 *= _inv_r0;
-            dy *= _inv_r0;
+        x0 *= _inv_r0;
+        dx *= _inv_r0;
+        y0 *= _inv_r0;
+        dy *= _inv_r0;
 
-            for (int j=0;j<n;++j,y0+=dy) {
-                double x = x0;
-                double ysq = y0*y0;
-                It valit = val.col(j).begin();
-                for (int i=0;i<m;++i,x+=dx) {
-                    double rsq = x*x + ysq;
-                    double phi = atan2(y0, x);
-                    *valit++ = _xnorm * _info->xValue(rsq, phi);
-                }
+        for (int j=0; j<n; ++j,y0+=dy,ptr+=skip) {
+            double x = x0;
+            double ysq = y0*y0;
+            for (int i=0;i<m;++i,x+=dx) {
+                double rsq = x*x + ysq;
+                double phi = atan2(y0, x);
+                *ptr++ = _xnorm * _info->xValue(rsq, phi);
             }
-        // }
+        }
     }
 
-    void SBMoffatlet::SBMoffatletImpl::fillXValue(tmv::MatrixView<double> val,
+    template <typename T>
+    void SBMoffatlet::SBMoffatletImpl::fillXImage(ImageView<T> im,
                                                   double x0, double dx, double dxy,
                                                   double y0, double dy, double dyx) const
     {
         dbg<<"SBMoffatlet fillXValue\n";
         dbg<<"x = "<<x0<<" + i * "<<dx<<" + j * "<<dxy<<std::endl;
         dbg<<"y = "<<y0<<" + i * "<<dyx<<" + j * "<<dy<<std::endl;
-        assert(val.stepi() == 1);
-        assert(val.canLinearize());
-        const int m = val.colsize();
-        const int n = val.rowsize();
-        typedef tmv::VIt<double,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
         x0 *= _inv_r0;
         dx *= _inv_r0;
@@ -186,68 +170,60 @@ namespace galsim {
         dy *= _inv_r0;
         dyx *= _inv_r0;
 
-        It valit = val.linearView().begin();
-        for (int j=0;j<n;++j,x0+=dxy,y0+=dy) {
+        for (int j=0; j<n; ++j,x0+=dxy,y0+=dy,ptr+=skip) {
             double x = x0;
             double y = y0;
-            It valit = val.col(j).begin();
             for (int i=0;i<m;++i,x+=dx,y+=dyx) {
                 double rsq = x*x + y*y;
-                double phi = atan2(y,x);
-                *valit++ = _xnorm * _info->xValue(rsq, phi);
+                double phi = atan2(y, x);
+                *ptr++ = _xnorm * _info->xValue(rsq, phi);
             }
         }
     }
 
-    void SBMoffatlet::SBMoffatletImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBMoffatlet::SBMoffatletImpl::fillKImage(ImageView<std::complex<T> > im,
                                                   double kx0, double dkx, int izero,
                                                   double ky0, double dky, int jzero) const
     {
         dbg<<"SBMoffatlet fillKValue\n";
         dbg<<"kx = "<<kx0<<" + i * "<<dkx<<", izero = "<<izero<<std::endl;
         dbg<<"ky = "<<ky0<<" + i * "<<dky<<", jzero = "<<jzero<<std::endl;
-        // Not sure about quadrant.  Moffatlets have different symmetries than most other profiles.
-        // if (izero != 0 || jzero != 0) {
-        //     xdbg<<"Use Quadrant\n";
-        //     fillKValueQuadrant(val,kx0,dkx,izero,ky0,dky,jzero);
-        // } else {
-            xdbg<<"Non-Quadrant\n";
-            assert(val.stepi() == 1);
-            const int m = val.colsize();
-            const int n = val.rowsize();
-            typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
-            kx0 *= _r0;
-            dkx *= _r0;
-            ky0 *= _r0;
-            dky *= _r0;
+        kx0 *= _r0;
+        dkx *= _r0;
+        ky0 *= _r0;
+        dky *= _r0;
 
-            for (int j=0;j<n;++j,ky0+=dky) {
-                double kx = kx0;
-                double kysq = ky0*ky0;
-                //It valit(val.col(j).begin().getP(),1);
-                It valit = val.col(j).begin();
-                for (int i=0;i<m;++i,kx+=dkx) {
-                    double ksq = kx*kx + kysq;
-                    double phi = atan2(ky0, kx);
-                    *valit++ = _info->kValue(ksq, phi);
-                }
+        for (int j=0; j<n; ++j,ky0+=dky,ptr+=skip) {
+            double kx = kx0;
+            double kysq = ky0*ky0;
+            for (int i=0;i<m;++i,kx+=dkx) {
+                double ksq = kx*kx + kysq;
+                double phi = atan2(ky0, kx);
+                *ptr++ = _info->kValue(ksq, phi);
             }
-        // }
+        }
     }
 
-    void SBMoffatlet::SBMoffatletImpl::fillKValue(tmv::MatrixView<std::complex<double> > val,
+    template <typename T>
+    void SBMoffatlet::SBMoffatletImpl::fillKImage(ImageView<std::complex<T> > im,
                                                   double kx0, double dkx, double dkxy,
                                                   double ky0, double dky, double dkyx) const
     {
         dbg<<"SBMoffatlet fillKValue\n";
         dbg<<"x = "<<kx0<<" + i * "<<dkx<<" + j * "<<dkxy<<std::endl;
         dbg<<"y = "<<ky0<<" + i * "<<dkyx<<" + j * "<<dky<<std::endl;
-        assert(val.stepi() == 1);
-        assert(val.canLinearize());
-        const int m = val.colsize();
-        const int n = val.rowsize();
-        typedef tmv::VIt<std::complex<double>,1,tmv::NonConj> It;
+        const int m = im.getNCol();
+        const int n = im.getNRow();
+        std::complex<T>* ptr = im.getData();
+        int skip = im.getNSkip();
+        assert(im.getStep() == 1);
 
         kx0 *= _r0;
         dkx *= _r0;
@@ -256,14 +232,13 @@ namespace galsim {
         dky *= _r0;
         dkyx *= _r0;
 
-        It valit = val.linearView().begin();
-        for (int j=0;j<n;++j,kx0+=dkxy,ky0+=dky) {
+        for (int j=0; j<n; ++j,kx0+=dkxy,ky0+=dky,ptr+=skip) {
             double kx = kx0;
             double ky = ky0;
             for (int i=0;i<m;++i,kx+=dkx,ky+=dkyx) {
                 double ksq = kx*kx + ky*ky;
-                double phi = atan2(ky,kx);
-                *valit++ = _info->kValue(ksq, phi);
+                double phi = atan2(ky, kx);
+                *ptr++ = _info->kValue(ksq, phi);
             }
         }
     }
@@ -272,7 +247,7 @@ namespace galsim {
         _beta(beta), _j(j), _q(q), _gsparams(gsparams),
         _maxk(0.), _stepk(0.),
         _xnorm(0.),
-        _ft(Table<double,double>::spline)
+        _ft(Table::spline)
     {
         dbg<<"Start MoffatletInfo constructor for beta = "<<_beta<<std::endl;
 
@@ -285,7 +260,7 @@ namespace galsim {
         if (_xnorm == 0.0) {
             dbg<<"_beta = "<<_beta<<std::endl;
             dbg<<"_j = "<<_j<<std::endl;
-            _xnorm = (_beta-1.0)/M_PI * boost::math::tgamma(_beta+_j)/boost::math::tgamma(_beta);
+            _xnorm = (_beta-1.0)/M_PI * math::tgamma(_beta+_j)/math::tgamma(_beta);
         }
         return _xnorm;
     }
@@ -303,7 +278,7 @@ namespace galsim {
     //     // (i.e., make a residual so this can be used to search for a target flux.
     //     {
     //         // double fnup1 = std::pow(u / 2., _nu+1.)
-    //         //     * boost::math::cyl_bessel_k(_nu+1., u)
+    //         //     * math::cyl_bessel_k(_nu+1., u)
     //         //     / _gamma_nup2;
     //         // double f = 1.0 - 2.0 * (1.+_nu)*fnup1;
     //         // return f - _target;
@@ -370,7 +345,7 @@ namespace galsim {
             // Solve for f(k) = maxk_threshold
             //
             double temp = (_gsparams->maxk_threshold
-                           * boost::math::tgamma(_beta-1.)
+                           * math::tgamma(_beta-1.)
                            * std::pow(2.,_beta-0.5)
                            / (2. * sqrt(M_PI)));
             // Solve k^(beta-1/2) exp(-k) = temp
@@ -400,7 +375,7 @@ namespace galsim {
 
     double MoffatletInfo::kValue(double ksq, double phi) const
     {
-        if (_ft.size() == 0) buildFT();
+        setupFT();
         double amplitude = _ft(std::sqrt(ksq));
         if (_q > 0) {
             if (_q & 1) // if q is odd
@@ -424,7 +399,7 @@ namespace galsim {
         double operator()(double r) const
         {
             return std::pow(r, 2.*_j)*std::pow(1+r*r, -_beta-_j)
-                *r*boost::math::cyl_bessel_j(2*_q, _k*r);
+                *r*math::cyl_bessel_j(2*_q, _k*r);
         }
     private:
         double _beta;
@@ -433,14 +408,15 @@ namespace galsim {
         double _k;
     };
 
-    void MoffatletInfo::buildFT() const
+    void MoffatletInfo::setupFT() const
     {
-        if (_ft.size() > 0) return;
+        if (_ft.finalized()) return;
+
         dbg<<"Building Moffatlet Hankel transform"<<std::endl;
         dbg<<"beta = "<<_beta<<std::endl;
         // Do a Hankel transform and store the results in a lookup table.
-        //double prefactor = 2*M_PI*_xnorm/boost::math::tgamma(_j+1);
-        double prefactor = 2.0*(_beta-1.0)*boost::math::tgamma(_beta+_j)/boost::math::tgamma(_beta);
+        //double prefactor = 2*M_PI*_xnorm/math::tgamma(_j+1);
+        double prefactor = 2.0*(_beta-1.0)*math::tgamma(_beta+_j)/math::tgamma(_beta);
         dbg<<"prefactor = "<<prefactor<<std::endl;
 
         // // Along the way, find the last k that has a kValue > 1.e-3
@@ -464,34 +440,34 @@ namespace galsim {
         for (double k = kmin; k < kmax; k += dk) {
             MoffatletIntegrand I(_beta, _j, _q, k);
 
-#ifdef DEBUGLOGGING
-            std::ostream* integ_dbgout = verbose_level >= 3 ? dbgout : 0;
-            integ::IntRegion<double> reg(0, integ::MOCK_INF, integ_dbgout);
-#else
             integ::IntRegion<double> reg(0, integ::MOCK_INF);
-#endif
 
+#if 0
             // Add explicit splits at first several roots of Jn.
             // This tends to make the integral more accurate.
+            // XXX: Need to add our own version of cyl_bessel_j_zero for n > 0.
+            // We only have math::getBesselRoot0(s);
             if (k != 0.0) {
                 for (int s=1; s<=30; ++s) {
-                    double root = boost::math::cyl_bessel_j_zero(double(2*_q), s);
+                    double root = math::cyl_bessel_j_zero(double(2*_q), s);
                     //if (root > r*30.0) break;
                     xxdbg<<"root="<<root/k<<std::endl;
                     reg.addSplit(root/k);
                 }
             }
             xxdbg<<"int reg = ("<<0<<","<<30<<")"<<std::endl;
+#endif
 
             double val = integ::int1d(
                 I, reg,
-                this->_gsparams->integration_relerr,
-                this->_gsparams->integration_abserr);
+                _gsparams->integration_relerr,
+                _gsparams->integration_abserr);
             val *= prefactor;
 
             xdbg<<"ft("<<k<<") = "<<val<<"   "<<val<<std::endl;
 
             _ft.addEntry(k, val);
         }
+        _ft.finalize();
     }
 }

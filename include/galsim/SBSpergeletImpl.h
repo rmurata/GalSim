@@ -73,15 +73,17 @@ namespace galsim {
     class SBSpergelet::SBSpergeletImpl : public SBProfileImpl
     {
     public:
-        SBSpergeletImpl(double nu, double r0, int j, int q, const GSParamsPtr& gsparams);
+        SBSpergeletImpl(double nu, double r0, int j, int q, const GSParams& gsparams);
 
         ~SBSpergeletImpl() {}
 
         double xValue(const Position<double>& p) const
-        { throw SBError("SBSpergelet::shoot() is not implemented"); }
+        { throw SBError("SBSpergelet::xValue() is not implemented"); }
 
         double getFlux() const // TODO: This is certainly not true
         { return 1.0; }
+        double maxSB() const { return 1.e300; }  // XXX: probably never needed, but maybe do
+                                                 //      something better for this.
 
         std::complex<double> kValue(const Position<double>& k) const;
 
@@ -106,17 +108,19 @@ namespace galsim {
         int getQ() const {return _q;}
 
         /// @brief Photon-shooting is not implemented for SBSpergelet, will throw an exception.
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const
-        { throw SBError("SBSpergelet::shoot() is not implemented"); }
+        void shoot(PhotonArray& photons, UniformDeviate ud) const
+        { throw SBError("SBSperglet::shoot() is not implemented"); }
 
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
 
-        std::string repr() const;
+        std::string serialize() const;
 
     private:
         double _nu;    ///< Spergel index
@@ -128,13 +132,13 @@ namespace galsim {
         double _r0_sq;
         double _inv_r0;
 
-        boost::shared_ptr<SpergeletInfo> _info; ///< Points to info structure for this nu, jq
+        shared_ptr<SpergeletInfo> _info; ///< Points to info structure for this nu, jq
 
         // Copy constructor and op= are undefined.
         SBSpergeletImpl(const SBSpergeletImpl& rhs);
         void operator=(const SBSpergeletImpl& rhs);
 
-        static LRUCache<boost::tuple< double, int, int, GSParamsPtr >, SpergeletInfo> cache;
+        static LRUCache<Tuple< double, int, int, GSParamsPtr >, SpergeletInfo> cache;
     };
 }
 

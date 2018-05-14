@@ -16,55 +16,15 @@
  *    this list of conditions, and the disclaimer given in the documentation
  *    and/or other materials provided with the distribution.
  */
-#ifndef __INTEL_COMPILER
-#if defined(__GNUC__) && __GNUC__ >= 4 && (__GNUC__ >= 5 || __GNUC_MINOR__ >= 8)
-#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
-#endif
-#endif
-
-#define BOOST_NO_CXX11_SMART_PTR
-#include "boost/python.hpp"
-#include "boost/python/stl_iterator.hpp"
-
+#include "PyBind11Helper.h"
 #include "SBSpergelet.h"
-
-namespace bp = boost::python;
 
 namespace galsim {
 
-    struct PySBSpergelet
+    void pyExportSBSpergelet(PY_MODULE& _galsim)
     {
-
-        static SBSpergelet* construct(double nu, double r0, int j, int q,
-                                      boost::shared_ptr<GSParams> gsparams)
-        {
-            return new SBSpergelet(nu, r0, j, q, gsparams);
-        }
-
-        static void wrap()
-        {
-            bp::class_<SBSpergelet,bp::bases<SBProfile> >("SBSpergelet",bp::no_init)
-                .def("__init__",
-                     bp::make_constructor(
-                        &construct, bp::default_call_policies(),
-                        (bp::arg("nu"),
-                         bp::arg("r0"),
-                         bp::arg("j"),
-                         bp::arg("q"),
-                         bp::arg("gsparams")=bp::object()))
-                )
-                .def(bp::init<const SBSpergelet &>())
-                .def("getNu", &SBSpergelet::getNu)
-                .def("getScaleRadius", &SBSpergelet::getScaleRadius)
-                .def("getJ", &SBSpergelet::getJ)
-                .def("getQ", &SBSpergelet::getQ)
-                ;
-        }
-    };
-
-    void pyExportSBSpergelet()
-    {
-        PySBSpergelet::wrap();
+        py::class_<SBSpergelet, BP_BASES(SBProfile)>(GALSIM_COMMA "SBSpergelet" BP_NOINIT)
+            .def(py::init<double,double,int,int, GSParams>());
     }
 
 } // namespace galsim

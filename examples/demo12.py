@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -27,7 +27,7 @@ level chromatic objects has not been written yet.
 This script introduces the chromatic objects module galsim.chromatic, which handles wavelength-
 dependent profiles.  Three uses of this module are demonstrated:
 
-1) A chromatic object representing a De Vaucouleurs galaxy with a early-type SED at redshift 0.8 is
+1) A chromatic object representing a De Vaucouleurs galaxy with an early-type SED at redshift 0.8 is
 created.  The galaxy is then drawn using the six LSST filter throughput curves to demonstrate that
 the galaxy is a g-band dropout.
 
@@ -42,12 +42,11 @@ For all cases, suggested parameters for viewing in ds9 are also included.
 
 New features introduced in this demo:
 
-- SED = galsim.SED(wave, flambda)
+- SED = galsim.SED(wave, flambda, wave_type, flux_type)
 - SED2 = SED.atRedshift(redshift)
-- bandpass = galsim.Bandpass(filename)
+- bandpass = galsim.Bandpass(filename, wave_type)
 - bandpass2 = bandpass.truncate(relative_throughput)
 - bandpass3 = bandpass2.thin(rel_err)
-- gal = galsim.Chromatic(GSObject, SED)
 - gal = GSObject * SED
 - obj = galsim.Add([list of ChromaticObjects])
 - ChromaticObject.drawImage(bandpass)
@@ -56,16 +55,21 @@ New features introduced in this demo:
 
 import sys
 import os
-import math
-import numpy
 import logging
 import galsim
 
 def main(argv):
     # Where to find and output data
     path, filename = os.path.split(__file__)
-    datapath = os.path.abspath(os.path.join(path, "data/"))
     outpath = os.path.abspath(os.path.join(path, "output/"))
+    if not os.path.isdir(outpath):
+        os.mkdir(outpath)
+
+    # Make output directory if not already present.
+    if not os.path.isdir(outpath):
+        os.mkdir(outpath)
+
+    datapath = galsim.meta_data.share_dir
 
     # In non-script code, use getLogger(__name__) at module scope instead.
     logging.basicConfig(format="%(message)s", level=logging.INFO, stream=sys.stdout)
@@ -79,14 +83,13 @@ def main(argv):
     SED_names = ['CWW_E_ext', 'CWW_Sbc_ext', 'CWW_Scd_ext', 'CWW_Im_ext']
     SEDs = {}
     for SED_name in SED_names:
-        SED_filename = os.path.join(datapath, '{0}.sed'.format(SED_name))
+        SED_filename = os.path.join(datapath, 'SEDs/{0}.sed'.format(SED_name))
         # Here we create some galsim.SED objects to hold star or galaxy spectra.  The most
         # convenient way to create realistic spectra is to read them in from a two-column ASCII
         # file, where the first column is wavelength and the second column is flux. Wavelengths in
-        # the example SED files are in Angstroms, flux in flambda.  The default wavelength type for
-        # galsim.SED is nanometers, however, so we need to override by specifying
-        # `wave_type = 'Ang'`.
-        SED = galsim.SED(SED_filename, wave_type='Ang')
+        # the example SED files are in Angstroms, flux in flambda.  We use a set of files that are
+        # distributed with GalSim in the share/ directory.
+        SED = galsim.SED(SED_filename, wave_type='Ang', flux_type='flambda')
         # The normalization of SEDs affects how many photons are eventually drawn into an image.
         # One way to control this normalization is to specify the flux density in photons per nm
         # at a particular wavelength.  For example, here we normalize such that the photon density
@@ -98,19 +101,19 @@ def main(argv):
     filter_names = 'ugrizy'
     filters = {}
     for filter_name in filter_names:
-        filter_filename = os.path.join(datapath, 'LSST_{0}.dat'.format(filter_name))
+        filter_filename = os.path.join(datapath, 'bandpasses/LSST_{0}.dat'.format(filter_name))
         # Here we create some galsim.Bandpass objects to represent the filters we're observing
         # through.  These include the entire imaging system throughput including the atmosphere,
         # reflective and refractive optics, filters, and the CCD quantum efficiency.  These are
         # also conveniently read in from two-column ASCII files where the first column is
-        # wavelength and the second column is dimensionless flux. The example filter files have
-        # units of nanometers and dimensionless throughput, which is exactly what galsim.Bandpass
-        # expects, so we just specify the filename.
-        filters[filter_name] = galsim.Bandpass(filter_filename)
+        # wavelength and the second column is dimensionless throughput. The example filter files
+        # units of nanometers for the wavelength type, so we specify that using the required
+        # `wave_type` argument.
+        filters[filter_name] = galsim.Bandpass(filter_filename, wave_type='nm')
         # For speed, we can thin out the wavelength sampling of the filter a bit.
         # In the following line, `rel_err` specifies the relative error when integrating over just
         # the filter (however, this is not necessarily the relative error when integrating over the
-        # filter times an SED)
+        # filter times an SED).
         filters[filter_name] = filters[filter_name].thin(rel_err=1e-4)
     logger.debug('Read in filters')
 
@@ -119,21 +122,20 @@ def main(argv):
     #-----------------------------------------------------------------------------------------------
     # Part A: chromatic de Vaucouleurs galaxy
 
-    # Here we create a chromatic version of a de Vaucouleurs profile using the Chromatic class.
-    # This class lets one create chromatic versions of any galsim GSObject class.  The first
-    # argument is the GSObject instance to be chromaticized, and the second argument is the
-    # profile's SED.
+    # Here we create a chromatic version of a de Vaucouleurs profile by multipying a GSObject by an
+    # SED.  This is how one generally constructs _separable_ ChromaticObjects in GalSim, that is,
+    # those objects whose spatial dependence and wavelength dependence factor.
 
     logger.info('')
     logger.info('Starting part A: chromatic De Vaucouleurs galaxy')
     redshift = 0.8
     mono_gal = galsim.DeVaucouleurs(half_light_radius=0.5)
     SED = SEDs['CWW_E_ext'].atRedshift(redshift)
-    gal = galsim.Chromatic(mono_gal, SED)
+    gal = mono_gal * SED
 
     # You can still shear, shift, and dilate the resulting chromatic object.
     gal = gal.shear(g1=0.5, g2=0.3).dilate(1.05).shift((0.0, 0.1))
-    logger.debug('Created Chromatic')
+    logger.debug('Created separable ChromaticObject')
 
     # convolve with PSF to make final profile
     PSF = galsim.Moffat(fwhm=0.6, beta=2.5)
@@ -142,7 +144,7 @@ def main(argv):
 
     # draw profile through LSST filters
     gaussian_noise = galsim.GaussianNoise(rng, sigma=0.1)
-    for filter_name, filter_ in filters.iteritems():
+    for filter_name, filter_ in filters.items():
         img = galsim.ImageF(64, 64, scale=pixel_scale)
         final.drawImage(filter_, image=img)
         img.addNoise(gaussian_noise)
@@ -164,7 +166,6 @@ def main(argv):
     # make a bulge ...
     mono_bulge = galsim.DeVaucouleurs(half_light_radius=0.5)
     bulge_SED = SEDs['CWW_E_ext'].atRedshift(redshift)
-    # The `*` operator can be used as a shortcut for creating a chromatic version of a GSObject:
     bulge = mono_bulge * bulge_SED
     bulge = bulge.shear(g1=0.12, g2=0.07)
     logger.debug('Created bulge component')
@@ -183,7 +184,7 @@ def main(argv):
 
     # draw profile through LSST filters
     gaussian_noise = galsim.GaussianNoise(rng, sigma=0.02)
-    for filter_name, filter_ in filters.iteritems():
+    for filter_name, filter_ in filters.items():
         img = galsim.ImageF(64, 64, scale=pixel_scale)
         bdfinal.drawImage(filter_, image=img)
         img.addNoise(gaussian_noise)
@@ -214,7 +215,7 @@ def main(argv):
     # throughputs, will, of course, be different.
     gal = mono_gal * SED
     gal = gal.shear(g1=0.5, g2=0.3)
-    logger.debug('Created `Chromatic` galaxy')
+    logger.debug('Created chromatic galaxy')
 
     # For a ground-based PSF, two chromatic effects are introduced by the atmosphere:
     # (i) differential chromatic refraction (DCR), and (ii) wavelength-dependent seeing.
@@ -236,8 +237,8 @@ def main(argv):
     # can be specified in several ways (see the ChromaticAtmosphere docstring for all of them).
     # Here are a couple ways: let's pretend our object is located near M101 on the sky, we observe
     # it 1 hour before it transits and we're observing from Mauna Kea.
-    ra = galsim.HMS_Angle("14:03:13") # hours : minutes : seconds
-    dec = galsim.DMS_Angle("54:20:57") # degrees : minutes : seconds
+    ra = galsim.Angle.from_hms("14:03:13") # hours : minutes : seconds
+    dec = galsim.Angle.from_dms("54:20:57") # degrees : minutes : seconds
     m101 = galsim.CelestialCoord(ra, dec)
     latitude = 19.8207 * galsim.degrees # latitude of Mauna Kea
     HA = -1.0 * galsim.hours # Hour angle = one hour before transit
@@ -253,11 +254,11 @@ def main(argv):
 
     # convolve with galaxy to create final profile
     final = galsim.Convolve([gal, PSF])
-    logger.debug('Created chromatic PSF finale profile')
+    logger.debug('Created chromatic PSF final profile')
 
     # Draw profile through LSST filters
     gaussian_noise = galsim.GaussianNoise(rng, sigma=0.03)
-    for filter_name, filter_ in filters.iteritems():
+    for filter_name, filter_ in filters.items():
         img = galsim.ImageF(64, 64, scale=pixel_scale)
         final.drawImage(filter_, image=img)
         img.addNoise(gaussian_noise)

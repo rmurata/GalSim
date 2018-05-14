@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -21,20 +21,23 @@
 # The fourth YAML configuration file in our tutorial about using Galsim config files
 # (This file is designed to be viewed in a window 100 characters wide.)
 #
-# This script is our first one to create multiple images.  Typically, you would want each
-# object to have at least some of its attributes vary when you are drawing multiple images 
-# (although not necessarily -- you might just want different noise realization of the same 
-# profile).  The easiest way to do this is to read in the properties from a catalog, which is 
-# what we do in this script.  The PSF is a truncated Moffat profile, and the galaxy is bulge
-# plus disk.  Both components get many of their parameters from an input catalog.  We also
-# shift the profile by a fraction of a pixel in each direction so the effect of pixelization 
-# varies among the images.  Each galaxy has the same applied shear.  The noise is simple 
-# Poisson noise.  We write the images out into a multi-extension fits file.
+# This script is our first one to create multiple images.  Typically, you would
+# want each object to have at least some of its attributes vary when you are
+# drawing multiple images (although not necessarily -- you might just want
+# different noise realization of the same profile).  The easiest way to do this
+# is to read in the properties from a catalog, which is what we do in this
+# script.  The PSF is a truncated Moffat profile, and the galaxy is bulge plus
+# disk, with added knots of star formation.  Both components get many of their
+# parameters from an input catalog.  We also shift the profile by a fraction of
+# a pixel in each direction so the effect of pixelization varies among the
+# images.  Each galaxy has the same applied shear.  The noise is simple Poisson
+# noise.  We write the images out into a multi-extension fits file.
 #
 # New features introduced in this demo:
 #
 # - obj type : Moffat (..., trunc)
 # - obj type : DeVaucouleurs (flux, half_light_radius)
+# - obj type : RandomWalk (npoints, half_light_radius, flux)
 # - value type : Catalog (col)
 # - obj : shift
 # - shift type : XY (x, y)
@@ -103,15 +106,39 @@ gal :
     type : Sum
 
     items :
-        - 
-            type : Exponential
-            half_light_radius : { type : Catalog , col : 5 }
+
+        # 0.6 of the flux is in the total disk.  Further divide this into a
+        # smooth disk and knots of star formation, modeled as point sources
+        # distributed via a random walk
+        #
+        # Note the knots get the same hlr as the smooth disk, and get sheared
+        # by the same ellipticity, but the knots will themselves have
+        # additional shape noise.
+        #
+        # To simulate a nice irregular (all the flux is in knots) we find ~100
+        # is a minimum number needed, but we will just use 10 here to make the
+        # demo run fast.
+        #
+        # See demo11.yaml for examples of how to specify variables relative to
+        # one another rather than hard coding them.
+        -  # disk
+            type : Sum
+            items :
+                -  # smooth component
+                    type : Exponential
+                    half_light_radius : { type : Catalog , col : 5 }
+                    flux : 0.18
+                -  # knots
+                    type : RandomWalk
+                    npoints: 10
+                    half_light_radius : { type : Catalog , col : 5 }
+                    flux : 0.42
             ellip : 
                 type : E1E2 
                 e1 : { type : Catalog , col : 6 }  
                 e2 : { type : Catalog , col : 7 }
-            flux : 0.6
-        -
+
+        - # bulge
             type : DeVaucouleurs
             half_light_radius : { type : Catalog , col : 8 }
             ellip : 
@@ -123,14 +150,22 @@ gal :
     # Note: If you want to use a variable defined above, you use a *
     flux : *gal_flux
 
-    # An object may have an ellip and a shear, each of which can be specified in terms
-    # of either E1E2 (distortion) or G1G2 (reduced shear).
-    # The only difference between the two is if there is also a rotation specified.
-    # The order of the various modifications are:
-    # - ellip
-    # - rotation
-    # - shear
-    # - shift
+    # An object may have an ellip and a shear, each of which can be specified in any format:
+    #   - E1E2 or EBeta (distortion)
+    #   - G1G2 or GBeta (reduced shear)
+    #   - Eta1Eta2 or EtaBeta (conformal shear, cf. demo9)
+    #   - QBeta (axis ratio, cf. demo3)
+    # Furthermore, the shear operations do not commute, so it matters which one is applied first.
+    # We use ellip to mean the intrinsic shape of the object and shear to mean the shear that
+    # is applied by lensing or other sources.  These also don't commute with either rotations or
+    # shifts, so here is the full list of transformations in the order that they are applied:
+    #
+    # - dilate or dilation        = scale linear size of the object preserving flux
+    # - ellip                     = set the intrinsic shape of the object
+    # - rotate or rotation        = rotate by some angle
+    # - magnify or magnification  = scale linear size of object preserving surface brightness
+    # - shear                     = apply the gravitational shear
+    # - shift                     = shift the centroid of the object
     shear : 
         type : G1G2 
         g1 : *gal_g1

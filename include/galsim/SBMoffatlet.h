@@ -65,8 +65,7 @@ namespace galsim {
          * @param[in] gsparams GSParams object storing constants that control the accuracy of image
          *                     operations and rendering, if different from the default.
          */
-        SBMoffatlet(double beta, double r0, int j, int q,
-                    const GSParamsPtr& gsparams);
+        SBMoffatlet(double beta, double r0, int j, int q, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBMoffatlet(const SBMoffatlet& rhs);

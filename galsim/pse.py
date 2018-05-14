@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -24,7 +24,6 @@ code was moved into the GalSim repository, but there are some demonstrations of 
 this code in devel/modules/lensing_engine.pdf
 """
 import numpy as np
-from numpy import pi
 import os
 import sys
 
@@ -119,8 +118,8 @@ class PowerSpectrumEstimator(object):
 
         # Define the possible ell range, the bin edges and effective ell values.
         # This is necessary for binning the power spectrum in ell.
-        lmin = 2*pi / self.sky_size
-        lmax = np.sqrt(2.)*pi / self.dx # in 2 dimensions
+        lmin = 2*np.pi / self.sky_size
+        lmax = np.sqrt(2.)*np.pi / self.dx # in 2 dimensions
         self.bin_edges = np.logspace(np.log10(lmin), np.log10(lmax), nbin+1)
         # By default, report an area-averaged value of ell, which should be fine if there is
         # no weighting (in which case it's recomputed) and if there are many ell modes in
@@ -145,7 +144,7 @@ class PowerSpectrumEstimator(object):
 
     def _generate_eb_rotation(self):
         # Set up the Fourier space grid lx, ly.
-        ell = 2*pi*np.fft.fftfreq(self.N, self.dx)
+        ell = 2*np.pi*np.fft.fftfreq(self.N, self.dx)
         lx, ly = np.meshgrid(ell,ell)
 
         # Now compute the lengths and angles of the ell vectors.
@@ -175,6 +174,7 @@ class PowerSpectrumEstimator(object):
         # then some non-flat weighting scheme is used for averaging over the ell values within a
         # bin.
         if ell_weight is not None:
+            ell_weight = np.abs(ell_weight)
             P,_ = np.histogram(self.l_abs, self.bin_edges, weights=C*ell_weight)
             count,_ = np.histogram(self.l_abs, self.bin_edges, weights=ell_weight)
         else:
@@ -201,10 +201,9 @@ class PowerSpectrumEstimator(object):
                                 rest of the PowerSpectrumEstimator functionality.  [default: False]
         @param theory_func      An optional callable function that can be used to get an idealized
                                 value of power at each point on the grid, and then see what results
-                                it gives for our chosen ell binning.  Unlike the main
-                                PowerSpectrumEstimator, this option requires a usable GalSim
-                                installation. [default: None]
+                                it gives for our chosen ell binning. [default: None]
         """
+        from .table import LookupTable
         # Check for the expected square geometry consistent with the previously-defined grid size.
         if g1.shape != g2.shape:
             raise ValueError("g1 and g2 grids do not have the same shape!")
@@ -228,9 +227,6 @@ class PowerSpectrumEstimator(object):
         C_BB = self._bin_power(B*np.conjugate(B))*(self.dx/self.N)**2
         C_EB = self._bin_power(E*np.conjugate(B))*(self.dx/self.N)**2
 
-        if theory_func or weight_EE or weight_BB:
-            import galsim
-
         if theory_func is not None:
             # theory_func needs to be a callable function
             C_theory_ell = np.zeros_like(self.l_abs)
@@ -238,6 +234,7 @@ class PowerSpectrumEstimator(object):
             C_theory = self._bin_power(C_theory_ell)
 
         if weight_EE or weight_BB:
+            import galsim
             # Need to interpolate C_EE to values of self.l_abs.  A bit of kludginess as we go off
             # the end of our final ell grid...
             new_ell = np.zeros(len(self.ell)+2)
@@ -250,7 +247,7 @@ class PowerSpectrumEstimator(object):
             new_CEE = np.zeros_like(new_ell)
             new_CEE[1:len(self.ell)+1] = np.real(C_EE)
             new_CEE[len(self.ell)+1] = new_CEE[len(self.ell)]
-            EE_table = galsim.LookupTable(new_ell, new_CEE)
+            EE_table = LookupTable(new_ell, new_CEE)
             ell_weight = EE_table(self.l_abs)
             C_EE = self._bin_power(E*np.conjugate(E), ell_weight=ell_weight)*(self.dx/self.N)**2
 
@@ -258,7 +255,7 @@ class PowerSpectrumEstimator(object):
             new_CBB = np.zeros_like(new_ell)
             new_CBB[1:len(self.ell)+1] = np.real(C_BB)
             new_CBB[len(self.ell)+1] = new_CBB[len(self.ell)]
-            BB_table = galsim.LookupTable(new_ell, new_CBB)
+            BB_table = LookupTable(new_ell, new_CBB)
             ell_weight = BB_table(self.l_abs)
             C_BB = self._bin_power(B*np.conjugate(B), ell_weight=ell_weight)*(self.dx/self.N)**2
 

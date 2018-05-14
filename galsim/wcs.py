@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -21,7 +21,7 @@ All the classes to implement different WCS transformations for GalSim Images.
 WCS stands for World Coordinate System.  This is the traditional term for the coordinate system
 on the sky.  (I know, the world's down here, and the sky's up there, so you'd think it would
 be reversed, but that's the way it goes.  Astronomy is full of terms that don't quite make sense
-when you look at them too closely.)  
+when you look at them too closely.)
 
 There are two kinds of world coordinates that we use here:
 
@@ -29,14 +29,14 @@ There are two kinds of world coordinates that we use here:
   They are a spherical coordinate system on the sky, akin to longitude and latitude on Earth.
   cf. http://en.wikipedia.org/wiki/Celestial_coordinate_system
 
-- Euclidean coordinates are defined relative to a tangent plane projection of the sky. 
-  If you imagine the sky coordinates on an actual sphere with a particular radius, then the 
-  tangent plane is tangent to that sphere.  We use the labels (u,v) for the coordinates in 
+- Euclidean coordinates are defined relative to a tangent plane projection of the sky.
+  If you imagine the sky coordinates on an actual sphere with a particular radius, then the
+  tangent plane is tangent to that sphere.  We use the labels (u,v) for the coordinates in
   this system, where +v points north and +u points west.  (Yes, west, not east.  As you look
   up into the sky, if north is up, then west is to the right.)
 
 The CelestialCoord class (in celestial.py) can convert between these two kinds of coordinates
-given a tangent point and projection type.  See the functions project() and deproject() for 
+given a tangent point and projection type.  See the functions project() and deproject() for
 details.
 
 The classes in this file convert between one of these kinds of world coordinates and positions
@@ -47,12 +47,16 @@ classes share.  The doc strings for the individual classes explain the features 
 each one.
 """
 
-import galsim
+import numpy as np
+from .gsobject import GSObject
+from .position import PositionI, PositionD
+from .celestial import CelestialCoord
+from .shear import Shear
 
 class BaseWCS(object):
     """The base class for all other kinds of WCS transformations.
 
-    All the functions the user will typically need are defined here.  Most subclasses just 
+    All the functions the user will typically need are defined here.  Most subclasses just
     define helper functions to implement each particular WCS definition.  So this base
     class defines the common interface for all WCS classes.
 
@@ -78,11 +82,11 @@ class BaseWCS(object):
             ShearWCS
             JacobianWCS
 
-    2. UniformWCS classes have a constant pixel size and shape, but they have an arbitrary origin 
-       in both image coordinates and world coordinates.  A LocalWCS class can be turned into a 
-       non-local UniformWCS class when an image has its bounds changed, e.g. by the commands 
+    2. UniformWCS classes have a constant pixel size and shape, but they have an arbitrary origin
+       in both image coordinates and world coordinates.  A LocalWCS class can be turned into a
+       non-local UniformWCS class when an image has its bounds changed, e.g. by the commands
        withCenter(), withOrigin() or shift().
-       
+
        Currently we define the following non-local, UniformWCS classes:
 
             OffsetWCS
@@ -90,7 +94,7 @@ class BaseWCS(object):
             AffineTransform
 
     3. EuclideanWCS classes use a regular Euclidean coordinate system for the world coordinates,
-       using PositionD for the world positions.  We use the notation (u,v) for the world 
+       using PositionD for the world positions.  We use the notation (u,v) for the world
        coordinates and (x,y) for the image coordinates.
 
        Currently we define the following non-uniform, Euclidean WCS class:
@@ -111,11 +115,11 @@ class BaseWCS(object):
            *WcsToolsWCS         -- requires wcstools command line functions to be installed
            *GSFitsWCS           -- native code, but has less functionality than the above
 
-    There is also a factory function called FitsWCS() (also defined in fitswcs.py), which is 
+    There is also a factory function called FitsWCS() (also defined in fitswcs.py), which is
     intended to act like a class initializer.  It tries to read a fits file using one of the
-    above classes and returns an instance of whichever one it found was successful.  It should 
-    always be successful, since its final attempt uses AffineTransform(), which has reasonable 
-    defaults when the WCS key words are not in the file, but of course this will only be 
+    above classes and returns an instance of whichever one it found was successful.  It should
+    always be successful, since its final attempt uses AffineTransform(), which has reasonable
+    defaults when the WCS key words are not in the file, but of course this will only be
     a very rough approximation of the true WCS.
 
 
@@ -154,7 +158,7 @@ class BaseWCS(object):
       If `wcs.toWorld(image_pos)` is not implemented for a particular WCS class, then a
       NotImplementedError will be raised if you pass in a `world_pos` argument.
 
-      The returned `local_wcs` is usually a JacobianWCS instance, but see the doc string for 
+      The returned `local_wcs` is usually a JacobianWCS instance, but see the doc string for
       local() for more details.
 
     - Construct a full affine approximation of a WCS at a given location:
@@ -208,28 +212,43 @@ class BaseWCS(object):
 
                >>> world_profile = wcs.toWorld(image_profile, image_pos=None, world_pos=None)
         """
-        if isinstance(arg, galsim.GSObject):
+        if isinstance(arg, GSObject):
             return self.profileToWorld(arg, **kwargs)
         else:
             return self.posToWorld(arg, **kwargs)
 
-    def posToWorld(self, image_pos):
+    def posToWorld(self, image_pos, color=None, **kwargs):
         """Convert a position from image coordinates to world coordinates.
 
         This is equivalent to `wcs.toWorld(image_pos)`.
-        """
-        if isinstance(image_pos, galsim.PositionI):
-            image_pos = galsim.PositionD(image_pos.x, image_pos.y)
-        elif not isinstance(image_pos, galsim.PositionD):
-            raise TypeError("toWorld requires a PositionD or PositionI argument")
-        return self._posToWorld(image_pos)
 
-    def profileToWorld(self, image_profile, image_pos=None, world_pos=None):
+        @param image_pos        The position in image coordinates
+        @param color            For color-dependent WCS's, the color term to use. [default: None]
+        @param project_center   (Only valid for CelestialWCS) A CelestialCoord to use for
+                                projecting the result onto a tangent plane world system rather
+                                than returning a CelestialCoord. [default: None]
+        @param projection       If project_center != None, the kind of projection to use.  See
+                                CelestialCoord.project for the valid options. [default: 'gnomonic']
+        """
+        if color is None: color = self._color
+        if isinstance(image_pos, PositionI):
+            image_pos = PositionD(image_pos.x, image_pos.y)
+        elif not isinstance(image_pos, PositionD):
+            raise TypeError("toWorld requires a PositionD or PositionI argument")
+        return self._posToWorld(image_pos, color=color, **kwargs)
+
+    def profileToWorld(self, image_profile, image_pos=None, world_pos=None, color=None):
         """Convert a profile from image coordinates to world coordinates.
 
         This is equivalent to `wcs.toWorld(image_profile, ...)`.
+
+        @param image_profile    The profile in image coordinates to transform.
+        @param image_pos        The image coordinate position (for non-uniform WCS types)
+        @param world_pos        The world coordinate position (for non-uniform WCS types)
+        @param color            For color-dependent WCS's, the color term to use. [default: None]
         """
-        return self.local(image_pos, world_pos)._profileToWorld(image_profile)
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._profileToWorld(image_profile)
 
     def toImage(self, arg, **kwargs):
         """Convert from world coordinates to image coordinates
@@ -238,7 +257,7 @@ class BaseWCS(object):
 
         1. The first converts a position from world coordinates to image coordinates.
            If the WCS is a EuclideanWCS, the argument may be either a PositionD or PositionI
-           argument.  If it is a CelestialWCS, then the argument must be a CelestialCoord. 
+           argument.  If it is a CelestialWCS, then the argument must be a CelestialCoord.
            It returns the corresponding position in image coordinates as a PositionD.
 
                >>> image_pos = wcs.toImage(world_pos)
@@ -251,32 +270,42 @@ class BaseWCS(object):
 
                >>> image_profile = wcs.toImage(world_profile, image_pos=None, world_pos=None)
         """
-        if isinstance(arg, galsim.GSObject):
+        if isinstance(arg, GSObject):
             return self.profileToImage(arg, **kwargs)
         else:
             return self.posToImage(arg, **kwargs)
 
-    def posToImage(self, world_pos):
+    def posToImage(self, world_pos, color=None):
         """Convert a position from world coordinates to image coordinates.
 
         This is equivalent to `wcs.toImage(world_pos)`.
-        """
-        if self.isCelestial() and not isinstance(world_pos, galsim.CelestialCoord):
-            raise TypeError("toImage requires a CelestialCoord argument")
-        elif not self.isCelestial() and isinstance(world_pos, galsim.PositionI):
-            world_pos = galsim.PositionD(world_pos.x, world_pos.y)
-        elif not self.isCelestial() and not isinstance(world_pos, galsim.PositionD):
-            raise TypeError("toImage requires a PositionD or PositionI argument")
-        return self._posToImage(world_pos)
 
-    def profileToImage(self, world_profile, image_pos=None, world_pos=None):
+        @param world_pos    The world coordinate position
+        @param color        For color-dependent WCS's, the color term to use. [default: None]
+        """
+        if color is None: color = self._color
+        if self.isCelestial() and not isinstance(world_pos, CelestialCoord):
+            raise TypeError("toImage requires a CelestialCoord argument")
+        elif not self.isCelestial() and isinstance(world_pos, PositionI):
+            world_pos = PositionD(world_pos.x, world_pos.y)
+        elif not self.isCelestial() and not isinstance(world_pos, PositionD):
+            raise TypeError("toImage requires a PositionD or PositionI argument")
+        return self._posToImage(world_pos, color=color)
+
+    def profileToImage(self, world_profile, image_pos=None, world_pos=None, color=None):
         """Convert a profile from world coordinates to image coordinates.
 
         This is equivalent to `wcs.toImage(world_profile, ...)`.
-        """
-        return self.local(image_pos, world_pos)._profileToImage(world_profile)
 
-    def pixelArea(self, image_pos=None, world_pos=None):
+        @param world_profile    The profile in world coordinates to transform.
+        @param image_pos        The image coordinate position (for non-uniform WCS types)
+        @param world_pos        The world coordinate position (for non-uniform WCS types)
+        @param color            For color-dependent WCS's, the color term to use. [default: None]
+        """
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._profileToImage(world_profile)
+
+    def pixelArea(self, image_pos=None, world_pos=None, color=None):
         """Return the area of a pixel in arcsec**2 (or in whatever units you are using for
         world coordinates if it is a EuclideanWCS).
 
@@ -285,12 +314,15 @@ class BaseWCS(object):
 
         @param image_pos    The image coordinate position (for non-uniform WCS types)
         @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            pixel area. [default: None]
 
         @returns the pixel area in arcsec**2.
         """
-        return self.local(image_pos, world_pos)._pixelArea()
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._pixelArea()
 
-    def minLinearScale(self, image_pos=None, world_pos=None):
+    def minLinearScale(self, image_pos=None, world_pos=None, color=None):
         """Return the minimum linear scale of the transformation in any direction.
 
         This is basically the semi-minor axis of the Jacobian.  Sometimes you need a
@@ -302,12 +334,15 @@ class BaseWCS(object):
 
         @param image_pos    The image coordinate position (for non-uniform WCS types)
         @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            scale. [default: None]
 
         @returns the minimum pixel area in any direction in arcsec.
         """
-        return self.local(image_pos, world_pos)._minScale()
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._minScale()
 
-    def maxLinearScale(self, image_pos=None, world_pos=None):
+    def maxLinearScale(self, image_pos=None, world_pos=None, color=None):
         """Return the maximum linear scale of the transformation in any direction.
 
         This is basically the semi-major axis of the Jacobian.  Sometimes you need a
@@ -319,17 +354,20 @@ class BaseWCS(object):
 
         @param image_pos    The image coordinate position (for non-uniform WCS types)
         @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            scale. [default: None]
 
         @returns the maximum pixel area in any direction in arcsec.
         """
-        return self.local(image_pos, world_pos)._maxScale()
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._maxScale()
 
     def isPixelScale(self):
         """Return whether the WCS transformation is a simple PixelScale or OffsetWCS.
 
         These are the simplest two WCS transformations.  PixelScale is local and OffsetWCS
-        is non-local.  If an Image has one of these WCS transformations as its WCS, then 
-        `im.scale` works to read and write the pixel scale.  If not, `im.scale` will raise a 
+        is non-local.  If an Image has one of these WCS transformations as its WCS, then
+        `im.scale` works to read and write the pixel scale.  If not, `im.scale` will raise a
         TypeError exception.
 
         `wcs.isPixelScale()` is shorthand for `isinstance(wcs, (galsim.PixelScale,
@@ -346,31 +384,34 @@ class BaseWCS(object):
 
     def isUniform(self):
         """Return whether the pixels in this WCS have uniform size and shape.
-        
+
         `wcs.isUniform()` is shorthand for `isinstance(wcs, galsim.UniformWCS)`.
         """
         return False   # Overridden by UniformWCS
 
     def isCelestial(self):
-        """Return whether the world coordinates are CelestialCoord (i.e. ra,dec).  
+        """Return whether the world coordinates are CelestialCoord (i.e. ra,dec).
 
         `wcs.isCelestial()` is shorthand for `isinstance(wcs, galsim.CelestialWCS)`.
         """
         return False   # Overridden by CelestialWCS
 
-    def local(self, image_pos=None, world_pos=None):
+    def local(self, image_pos=None, world_pos=None, color=None):
         """Return the local linear approximation of the WCS at a given point.
 
         @param image_pos    The image coordinate position (for non-uniform WCS types)
         @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            local WCS. [default: None]
 
         @returns a LocalWCS instance.
         """
+        if color is None: color = self._color
         if image_pos and world_pos:
             raise TypeError("Only one of image_pos or world_pos may be provided")
-        return self._local(image_pos, world_pos)
+        return self._local(image_pos, world_pos, color)
 
-    def jacobian(self, image_pos=None, world_pos=None):
+    def jacobian(self, image_pos=None, world_pos=None, color=None):
         """Return the local JacobianWCS of the WCS at a given point.
 
         This is basically the same as local(), but the return value is guaranteed to be a
@@ -388,35 +429,38 @@ class BaseWCS(object):
 
         @param image_pos    The image coordinate position (for non-uniform WCS types)
         @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            local jacobian. [default: None]
 
         @returns a JacobianWCS instance.
         """
-        return self.local(image_pos, world_pos)._toJacobian()
+        if color is None: color = self._color
+        return self.local(image_pos, world_pos, color=color)._toJacobian()
 
-    def affine(self, image_pos=None, world_pos=None):
+    def affine(self, image_pos=None, world_pos=None, color=None):
         """Return the local AffineTransform of the WCS at a given point.
 
-        This returns a linearized version of the current WCS at a given point.  It 
-        returns an AffineTransform that is locally approximately the same as the WCS in 
+        This returns a linearized version of the current WCS at a given point.  It
+        returns an AffineTransform that is locally approximately the same as the WCS in
         the vicinity of the given point.
 
         It is similar to jacobian(), except that this preserves the offset information
         between the image coordinates and world coordinates rather than setting both
         origins to (0,0).  Instead, the image origin is taken to be `image_pos`.
-        
-        For non-celestial coordinate systems, the world origin is taken to be 
+
+        For non-celestial coordinate systems, the world origin is taken to be
         `wcs.toWorld(image_pos)`.  In fact, `wcs.affine(image_pos)` is really just
         shorthand for:
-        
+
             >>> wcs.jacobian(image_pos).withOrigin(image_pos, wcs.toWorld(image_pos))
 
-        For celestial coordinate systems, there is no well-defined choice for the 
+        For celestial coordinate systems, there is no well-defined choice for the
         origin of the Euclidean world coordinate system.  So we just take (u,v) = (0,0)
         at the given position.  So, `wcs.affine(image_pos)` is equivalent to:
 
             >>> wcs.jacobian(image_pos).withOrigin(image_pos)
 
-        You can use the returned AffineTransform to access the relevant values of the 2x2 
+        You can use the returned AffineTransform to access the relevant values of the 2x2
         Jacobian matrix and the origins directly:
 
             >>> affine = wcs.affine(image_pos)
@@ -425,30 +469,33 @@ class BaseWCS(object):
             >>> v = affine.dvdx * (x-affine.x0) + jac.dvdy * (y-affine.y0) + affine.v0
             >>> # ... use u,v values to work directly in sky coordinates.
 
-        As usual, you may provide either `image_pos` or `world_pos` as you prefer to 
+        As usual, you may provide either `image_pos` or `world_pos` as you prefer to
         specify the location at which to approximate the WCS.
 
-        @param image_pos        The image coordinate position (for non-uniform WCS types)
-        @param world_pos        The world coordinate position (for non-uniform WCS types)
+        @param image_pos    The image coordinate position (for non-uniform WCS types)
+        @param world_pos    The world coordinate position (for non-uniform WCS types)
+        @param color        For color-dependent WCS's, the color term for which to evaluate the
+                            local affine transform. [default: None]
 
         @returns an AffineTransform instance
         """
-        jac = self.jacobian(image_pos, world_pos)
+        if color is None: color = self._color
+        jac = self.jacobian(image_pos, world_pos, color=color)
         # That call checked that only one of image_pos or world_pos is provided.
         if world_pos is not None:
-            image_pos = self.toImage(world_pos)
+            image_pos = self.toImage(world_pos, color=color)
         elif image_pos is None:
             # Both are None.  Must be a local WCS
-            image_pos = galsim.PositionD(0,0)
+            image_pos = PositionD(0,0)
 
         if self.isCelestial():
             return jac.withOrigin(image_pos)
         else:
             if world_pos is None:
-                world_pos = self.toWorld(image_pos)
-            return jac.withOrigin(image_pos, world_pos)
+                world_pos = self.toWorld(image_pos, color=color)
+            return jac.withOrigin(image_pos, world_pos, color=color)
 
-    def withOrigin(self, origin, world_origin=None):
+    def withOrigin(self, origin, world_origin=None, color=None):
         """Recenter the current WCS function at a new origin location, returning the new WCS.
 
         This function creates a new WCS instance (always a non-local WCS) that treats
@@ -459,14 +506,14 @@ class BaseWCS(object):
         So, for example, to set a WCS that has a constant pixel size with the world coordinates
         centered at the center of an image, you could write:
 
-            >>> wcs = galsim.PixelScale(scale).withOrigin(im.center())
+            >>> wcs = galsim.PixelScale(scale).withOrigin(im.center)
 
         This is equivalent to the following:
 
-            >>> wcs = galsim.OffsetWCS(scale, origin=im.center())
+            >>> wcs = galsim.OffsetWCS(scale, origin=im.center)
 
         For non-local WCS types, the origin defines the location in the image coordinate system
-        should mean the same thing as (x,y) = (0,0) does for the current WCS.  The following 
+        should mean the same thing as (x,y) = (0,0) does for the current WCS.  The following
         example should work regardless of what kind of WCS this is:
 
             >>> world_pos1 = wcs.toWorld(PositionD(0,0))
@@ -474,42 +521,59 @@ class BaseWCS(object):
             >>> world_pos2 = wcs2.toWorld(new_origin)
             >>> # world_pos1 should be equal to world_pos2
 
-        Furthermore, if the current WCS is a EuclideanWCS (wcs.isCelestial() == False) you may 
-        also provide a `world_origin` argument which defines what (u,v) position you want to 
+        Furthermore, if the current WCS is a EuclideanWCS (wcs.isCelestial() == False) you may
+        also provide a `world_origin` argument which defines what (u,v) position you want to
         correspond to the new origin.  Continuing the previous example:
 
             >>> wcs3 = wcs.withOrigin(new_origin, new_world_origin)
             >>> world_pos3 = wcs3.toWorld(new_origin)
             >>> # world_pos3 should be equal to new_world_origin
 
-        @param origin        The image coordinate position to use as the origin.
-        @param world_origin  The world coordinate position to use as the origin.  Only valid if
-                             wcs.isCelestial() == False. [default: None]
+        @param origin           The image coordinate position to use as the origin.
+        @param world_origin     The world coordinate position to use as the origin.  Only valid if
+                                wcs.isCelestial() == False. [default: None]
+        @param color            For color-dependent WCS's, the color term to use in the connection
+                                between the current origin and world_origin. [default: None]
 
         @returns the new recentered WCS
         """
-        if isinstance(origin, galsim.PositionI):
-            origin = galsim.PositionD(origin.x, origin.y)
-        elif not isinstance(origin, galsim.PositionD):
+        if color is None: color = self._color
+        if isinstance(origin, PositionI):
+            origin = PositionD(origin.x, origin.y)
+        elif not isinstance(origin, PositionD):
             raise TypeError("origin must be a PositionD or PositionI argument")
-        return self._withOrigin(origin, world_origin)
+        return self._withOrigin(origin, world_origin, color)
+
+    def fixColor(self, color):
+        """Fix the color to a particular value.
+
+        This changes a color-dependent WCS into the corresponding color-independent WCS
+        for the given color.
+
+        @param color        The value of the color term to use.
+
+        @returns the new color-independent WCS
+        """
+        ret = self.copy()
+        ret._color = color
+        return ret
 
     def writeToFitsHeader(self, header, bounds):
         """Write this WCS function to a FITS header.
 
         This is normally called automatically from within the galsim.fits.write() function.
 
-        The code will attempt to write standard FITS WCS keys so that the WCS will be readable 
-        by other software (e.g. ds9).  It may not be able to do so accurately, in which case a 
+        The code will attempt to write standard FITS WCS keys so that the WCS will be readable
+        by other software (e.g. ds9).  It may not be able to do so accurately, in which case a
         linearized version will be used instead.  (Specifically, it will use the local affine
-        transform with respect to the image center.)  
+        transform with respect to the image center.)
 
         However, this is not necessary for the WCS to survive a round trip through the FITS
-        header, as it will also write GalSim-specific key words that should allow it to 
+        header, as it will also write GalSim-specific key words that should allow it to
         reconstruct the WCS correctly.
 
         Caveat: For UVFunction and RaDecFunction, if the functions are real python functions
-        (rather than a string that is converted to a function), then the mechanism we use to 
+        (rather than a string that is converted to a function), then the mechanism we use to
         convert the function to a string that can be written to the header has a few limitations.
         1. It apparently only works for cpython implementations.
         2. It probably won't work to write from one version of python and read from another.
@@ -523,18 +587,18 @@ class BaseWCS(object):
         @param header       A FitsHeader object to write the data to.
         @param bounds       The bounds of the image.
         """
+        from . import fits
         # First write the XMIN, YMIN values
-        from galsim import pyfits_version
-        if not isinstance(header, galsim.fits.FitsHeader):
-            header = galsim.fits.FitsHeader(header)
+        if not isinstance(header, fits.FitsHeader):
+            header = fits.FitsHeader(header)
         header["GS_XMIN"] = (bounds.xmin, "GalSim image minimum x coordinate")
         header["GS_YMIN"] = (bounds.ymin, "GalSim image minimum y coordinate")
 
         if bounds.xmin != 1 or bounds.ymin != 1:
-            # ds9 always assumes the image has an origin at (1,1), so we always write the 
-            # WCS to the file with this convention.  We'll convert back when we read it 
+            # ds9 always assumes the image has an origin at (1,1), so we always write the
+            # WCS to the file with this convention.  We'll convert back when we read it
             # in if necessary.
-            delta = galsim.PositionI(1-bounds.xmin, 1-bounds.ymin)
+            delta = PositionI(1-bounds.xmin, 1-bounds.ymin)
             bounds = bounds.shift(delta)
             wcs = self.withOrigin(delta)
         else:
@@ -545,35 +609,58 @@ class BaseWCS(object):
         if hasattr(self, 'header'):
             # Store the items that are in self.header in the header if they weren't already put
             # there by the call to wcs._writeHeader() call.  (We don't want to overwrite the WCS.)
-            for key in self.header.keys():
-                if key not in header.keys():
+            for key in self.header:
+                if (key not in header and key.strip() != '' and
+                    key.strip() != 'COMMENT' and key.strip() != 'HISTORY'):
                     header[key] = self.header[key]
 
-    def makeSkyImage(self, image, sky_level):
+    def makeSkyImage(self, image, sky_level, color=None):
         """Make an image of the sky, correctly accounting for the pixel area, which might be
         variable over the image.
-        
+
         @param image        The image onto which the sky values will be put.
         @param sky_level    The sky level in ADU/arcsec^2 (or whatever your world coordinate
                             system units are, if not arcsec).
+        @param color        For color-dependent WCS's, the color term to use for making the
+                            sky image. [default: None]
         """
-        self._makeSkyImage(image, sky_level)
+        if color is None: color = self._color
+        self._makeSkyImage(image, sky_level, color)
+
+
+    # A lot of classes will need these checks, so consolidate them here
+    def _set_origin(self, origin, world_origin=None):
+        if origin is None:
+            self._origin = PositionD(0,0)
+        else:
+            if isinstance(origin, PositionI):
+                origin = PositionD(origin)
+            elif not isinstance(origin, PositionD):
+                raise TypeError("origin must be a PositionD or PositionI argument")
+            self._origin = origin
+        if world_origin is None:
+            self._world_origin = PositionD(0,0)
+        else:
+            if not isinstance(world_origin, PositionD):
+                raise TypeError("world_origin must be a PositionD argument")
+            self._world_origin = world_origin
+
 
 def readFromFitsHeader(header):
     """Read a WCS function from a FITS header.
 
     This is normally called automatically from within the galsim.fits.read() function, but
-    you can also call it directly as 
-    
+    you can also call it directly as
+
         wcs, origin = galsim.wcs.readFromFitsHeader(header)
 
     If the file was originally written by GalSim using one of the galsim.fits.write() functions,
-    then this should always succeed in reading back in the original WCS.  It may not end up 
+    then this should always succeed in reading back in the original WCS.  It may not end up
     as exactly the same class as the original, but the underlying world coordinate system
     transformation should be preserved.
 
-    Caveat: For UVFunction and RaDecFunction, if the functions that were written to the FITS 
-    header were real python functions (rather than a string that is converted to a function), 
+    Caveat: For UVFunction and RaDecFunction, if the functions that were written to the FITS
+    header were real python functions (rather than a string that is converted to a function),
     then the mechanism we use to write to the header and read it back in has some limitations:
     1. It apparently only works for cpython implementations.
     2. It probably won't work to write from one version of python and read from another.
@@ -584,8 +671,8 @@ def readFromFitsHeader(header):
     5. We haven't thought much about the security implications of this, so beware using
        GalSim to open FITS files from untrusted sources.
 
-    If the file was not written by GalSim, then this code will do its best to read the 
-    WCS information in the FITS header.  Depending on what kind of WCS is encoded in the 
+    If the file was not written by GalSim, then this code will do its best to read the
+    WCS information in the FITS header.  Depending on what kind of WCS is encoded in the
     header, this may or may not be successful.
 
     If there is no WCS information in the header, then this will default to a pixel scale
@@ -599,28 +686,37 @@ def readFromFitsHeader(header):
 
     @returns a tuple (wcs, origin) of the wcs from the header and the image origin.
     """
-    if not isinstance(header, galsim.fits.FitsHeader):
-        header = galsim.fits.FitsHeader(header)
+    from . import fits
+    from .fitswcs import FitsWCS
+    import galsim
+    if not isinstance(header, fits.FitsHeader):
+        header = fits.FitsHeader(header)
     xmin = header.get("GS_XMIN", 1)
     ymin = header.get("GS_YMIN", 1)
-    origin = galsim.PositionI(xmin, ymin)
+    origin = PositionI(xmin, ymin)
     wcs_name = header.get("GS_WCS", None)
-    if wcs_name:
+    if wcs_name is not None:
         wcs_type = eval('galsim.' + wcs_name)
         wcs = wcs_type._readHeader(header)
+    elif 'GS_SCALE' in header:
+        # Old versions of GalSim didn't write GS_WCS, but did write GS_SCALE, which implies that
+        # the wcs is just a PixelScale:
+        wcs = PixelScale(header['GS_SCALE'])
     elif 'CTYPE1' in header:
         try:
-            wcs = galsim.FitsWCS(header=header, suppress_warning=True)
-        except:
+            wcs = FitsWCS(header=header, suppress_warning=True)
+        except KeyboardInterrupt:
+            raise
+        except:  # pragma: no cover
             # This shouldn't ever happen, but just in case...
-            wcs = galsim.PixelScale(1.)
+            wcs = PixelScale(1.)
     else:
-        wcs = galsim.PixelScale(1.)
+        wcs = PixelScale(1.)
 
     if xmin != 1 or ymin != 1:
         # ds9 always assumes the image has an origin at (1,1), so convert back to actual
         # xmin, ymin if necessary.
-        delta = galsim.PositionI(xmin-1, ymin-1)
+        delta = PositionI(xmin-1, ymin-1)
         wcs = wcs.withOrigin(delta)
 
     return wcs, origin
@@ -636,7 +732,7 @@ def readFromFitsHeader(header):
 #                        --- LocalWCS
 #        --- CelestialWCS
 #
-# Here we define the rest of these classes (besides BaseWCS that is), and implement some 
+# Here we define the rest of these classes (besides BaseWCS that is), and implement some
 # functionality that is common among the subclasses of these when possible.
 #
 #########################################################################################
@@ -644,7 +740,7 @@ def readFromFitsHeader(header):
 
 class EuclideanWCS(BaseWCS):
     """A EuclideanWCS is a BaseWCS whose world coordinates are on a Euclidean plane.
-    We usually use the notation (u,v) to refer to positions in world coordinates, and 
+    We usually use the notation (u,v) to refer to positions in world coordinates, and
     they use the class PositionD.
     """
 
@@ -660,22 +756,22 @@ class EuclideanWCS(BaseWCS):
     def v0(self): return self.world_origin.y
 
     # Simple.  Just call _u, _v.
-    def _posToWorld(self, image_pos):
+    def _posToWorld(self, image_pos, color):
         x = image_pos.x - self.x0
         y = image_pos.y - self.y0
-        return galsim.PositionD(self._u(x,y), self._v(x,y)) + self.world_origin
+        return PositionD(self._u(x,y,color), self._v(x,y,color)) + self.world_origin
 
-    # Also simple if _x,_y are implemented.  However, they are allowed to raise a 
+    # Also simple if _x,_y are implemented.  However, they are allowed to raise a
     # NotImplementedError.
-    def _posToImage(self, world_pos):
+    def _posToImage(self, world_pos, color):
         u = world_pos.x - self.u0
         v = world_pos.y - self.v0
-        return galsim.PositionD(self._x(u,v),self._y(u,v)) + self.origin
+        return PositionD(self._x(u,v,color),self._y(u,v,color)) + self.origin
 
     # Each subclass has a function _newOrigin, which just calls the constructor with new
-    # values for origin and world_origin.  This function figures out what those values 
+    # values for origin and world_origin.  This function figures out what those values
     # should be to match the desired behavior of withOrigin.
-    def _withOrigin(self, origin, world_origin):
+    def _withOrigin(self, origin, world_origin, color):
         # Current u,v are:
         #     u = ufunc(x-x0, y-y0) + u0
         #     v = vfunc(x-x0, y-y0) + v0
@@ -687,8 +783,8 @@ class EuclideanWCS(BaseWCS):
         #     Use (x1,y1) and (u1,v1) for the new values that we will pass to _newOrigin.
         #     Use (x2,y2) and (u2,v2) for the values passed as arguments.
         #
-        # If world_origin is None, then we want to do basically the same thing as in the 
-        # non-uniform case, except that we also need to pass the function the current value of 
+        # If world_origin is None, then we want to do basically the same thing as in the
+        # non-uniform case, except that we also need to pass the function the current value of
         # wcs.world_pos to keep it from resetting the world_pos back to None.
 
         if world_origin is None:
@@ -706,14 +802,14 @@ class EuclideanWCS(BaseWCS):
         #     u'(x2,y2) = u2
         #     ufunc(x2-x1, y2-y1) + u1 = u2
         #
-        # We don't have access to ufunc directly, just u, so 
+        # We don't have access to ufunc directly, just u, so
         #     (u(x2-x1+x0, y2-y1+y0) - u0) + u1 = u2
         #
         # If we take
         #     x1 = x2
         #     y1 = y2
         #
-        # Then 
+        # Then
         #     u(x0,y0) - u0 + u1 = u2
         # =>  u1 = u0 + u2 - u(x0,y0)
         #
@@ -721,43 +817,40 @@ class EuclideanWCS(BaseWCS):
         #     v1 = v0 + v2 - v(x0,y0)
 
         else:
-            if isinstance(world_origin, galsim.PositionI):
-                world_origin = galsim.PositionD(world_origin.x, world_origin.y)
-            elif not isinstance(origin, galsim.PositionD):
+            if isinstance(world_origin, PositionI):
+                world_origin = PositionD(world_origin.x, world_origin.y)
+            elif not isinstance(origin, PositionD):
                 raise TypeError("world_origin must be a PositionD or PositionI argument")
             if not self.isLocal():
-                world_origin += self.world_origin - self._posToWorld(self.origin)
+                world_origin += self.world_origin - self._posToWorld(self.origin, color=color)
             return self._newOrigin(origin, world_origin)
 
     # If the class doesn't define something else, then we can approximate the local Jacobian
     # from finite differences for the derivatives.  This will be overridden by UniformWCS.
-    def _local(self, image_pos, world_pos):
+    def _local(self, image_pos, world_pos, color):
         if image_pos is None:
             if world_pos is None:
                 raise TypeError("Either image_pos or world_pos must be provided")
-            image_pos = self._posToImage(world_pos)
+            image_pos = self._posToImage(world_pos, color=color)
 
         # Calculate the Jacobian using finite differences for the derivatives.
         x0 = image_pos.x - self.x0
         y0 = image_pos.y - self.y0
-        u0 = self._u(x0,y0)
-        v0 = self._v(x0,y0)
 
         # Use dx,dy = 1 pixel for numerical derivatives
         dx = 1
         dy = 1
 
-        import numpy
-        xlist = numpy.array([ x0+dx, x0-dx, x0,    x0    ])
-        ylist = numpy.array([ y0,    y0,    y0+dy, y0-dy ])
+        xlist = np.array([ x0+dx, x0-dx, x0,    x0    ])
+        ylist = np.array([ y0,    y0,    y0+dy, y0-dy ])
         try :
             # Try using numpy arrays first, since it should be faster if it works.
-            u = self._u(xlist,ylist)
-            v = self._v(xlist,ylist)
-        except:
+            u = self._u(xlist,ylist,color)
+            v = self._v(xlist,ylist,color)
+        except TypeError:
             # Otherwise do them one at a time.
-            u = [ self._u(x,y) for (x,y) in zip(xlist,ylist) ]
-            v = [ self._v(x,y) for (x,y) in zip(xlist,ylist) ]
+            u = [ self._u(x,y,color) for (x,y) in zip(xlist,ylist) ]
+            v = [ self._v(x,y,color) for (x,y) in zip(xlist,ylist) ]
 
         dudx = 0.5 * (u[0] - u[1]) / dx
         dudy = 0.5 * (u[2] - u[3]) / dy
@@ -769,37 +862,36 @@ class EuclideanWCS(BaseWCS):
     # The naive way to make the sky image is to loop over pixels and call pixelArea(pos)
     # for that position.  This is extremely slow.  Here, we use the fact that the _u and _v
     # functions might work with numpy arrays.  If they do, this function is quite fast.
-    # If not, we still get some gain from calculating u,v for each pixel and sharing some 
-    # of those calculations for multiple finite difference derivatives.  But the latter 
-    # option is still pretty slow, so it's much better to have the _u and _v work with 
+    # If not, we still get some gain from calculating u,v for each pixel and sharing some
+    # of those calculations for multiple finite difference derivatives.  But the latter
+    # option is still pretty slow, so it's much better to have the _u and _v work with
     # numpy arrays!
-    def _makeSkyImage(self, image, sky_level):
-        import numpy
+    def _makeSkyImage(self, image, sky_level, color):
         b = image.bounds
         nx = b.xmax-b.xmin+1 + 2  # +2 more than in image to get row/col off each edge.
         ny = b.ymax-b.ymin+1 + 2
-        x,y = numpy.meshgrid( numpy.linspace(b.xmin-1,b.xmax+1,nx),
-                              numpy.linspace(b.ymin-1,b.ymax+1,ny) )
+        x,y = np.meshgrid( np.linspace(b.xmin-1,b.xmax+1,nx),
+                           np.linspace(b.ymin-1,b.ymax+1,ny) )
         x -= self.x0
         y -= self.y0
         try:
             # First try to use the _u, _v function with the numpy arrays.
-            u = self._u(x.flatten(),y.flatten())
-            v = self._v(x.flatten(),y.flatten())
-        except:
+            u = self._u(x.ravel(),y.ravel(),color)
+            v = self._v(x.ravel(),y.ravel(),color)
+        except TypeError:
             # If that didn't work, we have to do it manually for each position. :(  (SLOW!)
-            u = numpy.array([ self._u(x1,y1) for x1,y1 in zip(x.flatten(),y.flatten()) ])
-            v = numpy.array([ self._v(x1,y1) for x1,y1 in zip(x.flatten(),y.flatten()) ])
-        u = numpy.reshape(u, x.shape)
-        v = numpy.reshape(v, x.shape)
+            u = np.array([ self._u(x1,y1,color) for x1,y1 in zip(x.ravel(),y.ravel()) ])
+            v = np.array([ self._v(x1,y1,color) for x1,y1 in zip(x.ravel(),y.ravel()) ])
+        u = np.reshape(u, x.shape)
+        v = np.reshape(v, x.shape)
         # Use the finite differences to estimate the derivatives.
         dudx = 0.5 * (u[1:ny-1,2:nx] - u[1:ny-1,0:nx-2])
         dudy = 0.5 * (u[2:ny,1:nx-1] - u[0:ny-2,1:nx-1])
         dvdx = 0.5 * (v[1:ny-1,2:nx] - v[1:ny-1,0:nx-2])
         dvdy = 0.5 * (v[2:ny,1:nx-1] - v[0:ny-2,1:nx-1])
 
-        area = numpy.abs(dudx * dvdy - dvdx * dudy)
-        image.image.array[:,:] = area * sky_level
+        area = np.abs(dudx * dvdy - dvdx * dudy)
+        image.array[:,:] = area * sky_level
 
     # Each class should define the __eq__ function.  Then __ne__ is obvious.
     def __ne__(self, other): return not self.__eq__(other)
@@ -811,22 +903,22 @@ class UniformWCS(EuclideanWCS):
     def isUniform(self): return True
 
     # These can also just pass through to the _localwcs attribute.
-    def _u(self, x, y):
+    def _u(self, x, y, color=None):
         return self._local_wcs._u(x,y)
-    def _v(self, x, y):
+    def _v(self, x, y, color=None):
         return self._local_wcs._v(x,y)
-    def _x(self, u, v):
+    def _x(self, u, v, color=None):
         return self._local_wcs._x(u,v)
-    def _y(self, u, v):
+    def _y(self, u, v, color=None):
         return self._local_wcs._y(u,v)
 
     # For UniformWCS, the local WCS is an attribute.  Just return it.
-    def _local(self, image_pos=None, world_pos=None): 
+    def _local(self, image_pos=None, world_pos=None, color=None):
         return self._local_wcs
 
     # UniformWCS transformations can be inverted easily, so might as well provide that function.
     def inverse(self):
-        """Return the inverse transformation, i.e. the transformation that swaps the roles of 
+        """Return the inverse transformation, i.e. the transformation that swaps the roles of
         the "image" and "world" coordinates.
         """
         return self._inverse()
@@ -837,7 +929,7 @@ class UniformWCS(EuclideanWCS):
         return self._local_wcs._inverse()._newOrigin(self.world_origin, self.origin)
 
     # This is very simple if the pixels are uniform.
-    def _makeSkyImage(self, image, sky_level):
+    def _makeSkyImage(self, image, sky_level, color):
         image.fill(sky_level * self.pixelArea())
 
     # Just check if the locals match and if the origins match.
@@ -857,24 +949,24 @@ class LocalWCS(UniformWCS):
 
     # The origins are definitionally (0,0) for these.  So just define them here.
     @property
-    def origin(self): return galsim.PositionD(0,0)
+    def origin(self): return PositionD(0,0)
     @property
-    def world_origin(self): return galsim.PositionD(0,0)
+    def world_origin(self): return PositionD(0,0)
 
     # For LocalWCS, there is no origin to worry about.
-    def _posToWorld(self, image_pos):
+    def _posToWorld(self, image_pos, color):
         x = image_pos.x
         y = image_pos.y
-        return galsim.PositionD(self._u(x,y),self._v(x,y))
+        return PositionD(self._u(x,y),self._v(x,y))
 
     # For LocalWCS, there is no origin to worry about.
-    def _posToImage(self, world_pos):
+    def _posToImage(self, world_pos, color):
         u = world_pos.x
         v = world_pos.y
-        return galsim.PositionD(self._x(u,v),self._y(u,v))
+        return PositionD(self._x(u,v),self._y(u,v))
 
     # For LocalWCS, this is of course trivial.
-    def _local(self, image_pos, world_pos): 
+    def _local(self, image_pos, world_pos, color):
         return self
 
 
@@ -891,7 +983,7 @@ class CelestialWCS(BaseWCS):
     def y0(self): return self.origin.y
 
     # This is a bit simpler than the EuclideanWCS version, since there is no world_origin.
-    def _withOrigin(self, origin, world_origin):
+    def _withOrigin(self, origin, world_origin, color):
         # We want the new wcs to have wcs.toWorld(x2,y2) match the current wcs.toWorld(0,0).
         # So,
         #
@@ -908,14 +1000,15 @@ class CelestialWCS(BaseWCS):
         return self._newOrigin(origin)
 
     # If the class doesn't define something else, then we can approximate the local Jacobian
-    # from finite differences for the derivatives of ra and dec.  Very similar to the 
+    # from finite differences for the derivatives of ra and dec.  Very similar to the
     # version for EuclideanWCS, but convert from dra, ddec to du, dv locallat at the given
     # position.
-    def _local(self, image_pos, world_pos):
+    def _local(self, image_pos, world_pos, color):
+        from .angle import radians, arcsec
         if image_pos is None:
             if world_pos is None:
                 raise TypeError("Either image_pos or world_pos must be provided")
-            image_pos = self._posToImage(world_pos)
+            image_pos = self._posToImage(world_pos, color)
 
         x0 = image_pos.x - self.x0
         y0 = image_pos.y - self.y0
@@ -923,15 +1016,16 @@ class CelestialWCS(BaseWCS):
         dx = 1
         dy = 1
 
-        import numpy
-        xlist = numpy.array([ x0, x0+dx, x0-dx, x0,    x0    ])
-        ylist = numpy.array([ y0, y0,    y0,    y0+dy, y0-dy ])
+        xlist = np.array([ x0, x0+dx, x0-dx, x0,    x0    ])
+        ylist = np.array([ y0, y0,    y0,    y0+dy, y0-dy ])
         try :
             # Try using numpy arrays first, since it should be faster if it works.
-            ra, dec = self._radec(xlist,ylist)
-        except:
+            ra, dec = self._radec(xlist,ylist,color)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
             # Otherwise do them one at a time.
-            world = [ self._radec(x,y) for (x,y) in zip(xlist,ylist) ]
+            world = [ self._radec(x,y,color) for (x,y) in zip(xlist,ylist) ]
             ra = [ w[0] for w in world ]
             dec = [ w[1] for w in world ]
 
@@ -939,63 +1033,71 @@ class CelestialWCS(BaseWCS):
         # i.e. The u,v plane is the tangent plane as seen from Earth with +v pointing
         # north, and +u pointing west.
         # That means the du values are the negative of dra.
-        cosdec = numpy.cos(dec[0])
+        cosdec = np.cos(dec[0])
         dudx = -0.5 * (ra[1] - ra[2]) / dx * cosdec
         dudy = -0.5 * (ra[3] - ra[4]) / dy * cosdec
         dvdx = 0.5 * (dec[1] - dec[2]) / dx
         dvdy = 0.5 * (dec[3] - dec[4]) / dy
 
         # These values are all in radians.  Convert to arcsec as per our usual standard.
-        factor = galsim.radians / galsim.arcsec
+        factor = radians / arcsec
         return JacobianWCS(dudx*factor, dudy*factor, dvdx*factor, dvdy*factor)
 
     # This is similar to the version for EuclideanWCS, but uses dra, ddec.
     # Again, it is much faster if the _radec function works with numpy arrays.
-    def _makeSkyImage(self, image, sky_level):
-        import numpy
+    def _makeSkyImage(self, image, sky_level, color):
+        from .angle import radians, arcsec
         b = image.bounds
         nx = b.xmax-b.xmin+1 + 2  # +2 more than in image to get row/col off each edge.
         ny = b.ymax-b.ymin+1 + 2
-        x,y = numpy.meshgrid( numpy.linspace(b.xmin-1,b.xmax+1,nx),
-                              numpy.linspace(b.ymin-1,b.ymax+1,ny) )
+        x,y = np.meshgrid( np.linspace(b.xmin-1,b.xmax+1,nx),
+                           np.linspace(b.ymin-1,b.ymax+1,ny) )
         x -= self.x0
         y -= self.y0
         try:
             # First try to use the _radec function with the numpy arrays.
-            ra, dec = self._radec(x.flatten(),y.flatten())
-        except:
+            ra, dec = self._radec(x.ravel(),y.ravel(),color)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
             # If that didn't work, we have to do it manually for each position. :(  (SLOW!)
-            rd = [ self._radec(x1,y1) for x1,y1 in zip(x.flatten(),y.flatten()) ]
-            ra = numpy.array([ radec[0] for radec in rd ])
-            dec = numpy.array([ radec[1] for radec in rd ])
-        ra = numpy.reshape(ra, x.shape)
-        dec = numpy.reshape(dec, x.shape)
+            rd = [ self._radec(x1,y1,color) for x1,y1 in zip(x.ravel(),y.ravel()) ]
+            ra = np.array([ radec[0] for radec in rd ])
+            dec = np.array([ radec[1] for radec in rd ])
+        ra = np.reshape(ra, x.shape)
+        dec = np.reshape(dec, x.shape)
 
         # Use the finite differences to estimate the derivatives.
-        cosdec = numpy.cos(dec[1:ny-1,1:nx-1])
+        cosdec = np.cos(dec[1:ny-1,1:nx-1])
         dudx = -0.5 * (ra[1:ny-1,2:nx] - ra[1:ny-1,0:nx-2]) * cosdec
         dudy = -0.5 * (ra[2:ny,1:nx-1] - ra[0:ny-2,1:nx-1]) * cosdec
         dvdx = 0.5 * (dec[1:ny-1,2:nx] - dec[1:ny-1,0:nx-2])
         dvdy = 0.5 * (dec[2:ny,1:nx-1] - dec[0:ny-2,1:nx-1])
 
-        area = numpy.abs(dudx * dvdy - dvdx * dudy)
-        factor = galsim.radians / galsim.arcsec
-        image.image.array[:,:] = area * sky_level * factor**2
+        area = np.abs(dudx * dvdy - dvdx * dudy)
+        factor = radians / arcsec
+        image.array[:,:] = area * sky_level * factor**2
 
 
     # Simple.  Just call _radec.
-    def _posToWorld(self, image_pos):
+    def _posToWorld(self, image_pos, color, project_center=None, projection='gnomonic'):
+        from .angle import radians, arcsec
         x = image_pos.x - self.x0
         y = image_pos.y - self.y0
-        ra, dec = self._radec(x,y)
-        return galsim.CelestialCoord(ra*galsim.radians, dec*galsim.radians)
+        ra, dec = self._radec(x,y,color)
+        coord = CelestialCoord(ra*radians, dec*radians)
+        if project_center is None:
+            return coord
+        else:
+            u,v = project_center.project(coord, projection=projection)
+            return PositionD(u/arcsec, v/arcsec)
 
     # Also simple if _xy is implemented.  However, it is allowed to raise a NotImplementedError.
-    def _posToImage(self, world_pos):
-        ra = world_pos.ra.rad()
-        dec = world_pos.dec.rad()
-        x, y = self._xy(ra,dec)
-        return galsim.PositionD(x,y) + self.origin
+    def _posToImage(self, world_pos, color):
+        ra = world_pos.ra.rad
+        dec = world_pos.dec.rad
+        x, y = self._xy(ra,dec,color)
+        return PositionD(x,y) + self.origin
 
     # Each class should define the __eq__ function.  Then __ne__ is obvious.
     def __ne__(self, other): return not self.__eq__(other)
@@ -1057,9 +1159,9 @@ class PixelScale(LocalWCS):
     _opt_params = {}
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, scale):
+        self._color = None
         self._scale = scale
 
     # Help make sure PixelScale is read-only.
@@ -1069,23 +1171,27 @@ class PixelScale(LocalWCS):
     def isPixelScale(self):
         return True
 
-    def _u(self, x, y):
+    def _u(self, x, y, color=None):
         return x * self._scale
 
-    def _v(self, x, y):
+    def _v(self, x, y, color=None):
         return y * self._scale
 
-    def _x(self, u, v):
+    def _x(self, u, v, color=None):
         return u / self._scale
 
-    def _y(self, u, v):
+    def _y(self, u, v, color=None):
         return v / self._scale
 
     def _profileToWorld(self, image_profile):
-        return image_profile.dilate(self._scale)
+        from .transform import _Transform
+        return _Transform(image_profile, (self._scale, 0., 0., self._scale),
+                          flux_ratio=self._scale**-2)
 
     def _profileToImage(self, world_profile):
-        return world_profile.dilate(1./self._scale)
+        from .transform import _Transform
+        return _Transform(world_profile, (1./self._scale, 0., 0., 1./self._scale),
+                          flux_ratio=self._scale**2)
 
     def _pixelArea(self):
         return self._scale**2
@@ -1154,13 +1260,13 @@ class ShearWCS(LocalWCS):
     The Shear transformation conserves object area, so if the input `scale` == 1 then the
     transformation represented by the ShearWCS will conserve object area also.
     """
-    _req_params = { "scale" : float, "shear" : galsim.Shear }
+    _req_params = { "scale" : float, "shear" : Shear }
     _opt_params = {}
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, scale, shear):
+        self._color = None
         self._scale = scale
         self._shear = shear
         self._g1 = shear.g1
@@ -1176,29 +1282,29 @@ class ShearWCS(LocalWCS):
     def shear(self): return self._shear
 
     @property
-    def origin(self): return galsim.PositionD(0,0)
+    def origin(self): return PositionD(0,0)
     @property
-    def world_origin(self): return galsim.PositionD(0,0)
+    def world_origin(self): return PositionD(0,0)
 
-    def _u(self, x, y):
+    def _u(self, x, y, color=None):
         u = x * (1.-self._g1) - y * self._g2
         u *= self._gfactor * self._scale
-        return u;
+        return u
 
-    def _v(self, x, y):
+    def _v(self, x, y, color=None):
         v = y * (1.+self._g1) - x * self._g2
         v *= self._gfactor * self._scale
-        return v;
+        return v
 
-    def _x(self, u, v):
+    def _x(self, u, v, color=None):
         x = u * (1.+self._g1) + v * self._g2
         x *= self._gfactor / self._scale
-        return x;
+        return x
 
-    def _y(self, u, v):
+    def _y(self, u, v, color=None):
         y = v * (1.-self._g1) + u * self._g2
         y *= self._gfactor / self._scale
-        return y;
+        return y
 
     def _profileToWorld(self, image_profile):
         return image_profile.dilate(self._scale).shear(-self.shear)
@@ -1241,7 +1347,7 @@ class ShearWCS(LocalWCS):
         scale = header["GS_SCALE"]
         g1 = header["GS_G1"]
         g2 = header["GS_G2"]
-        return ShearWCS(scale, galsim.Shear(g1,g2))
+        return ShearWCS(scale, Shear(g1=g1, g2=g2))
 
     def _newOrigin(self, origin, world_origin):
         return OffsetShearWCS(self._scale, self._shear, origin, world_origin)
@@ -1266,8 +1372,8 @@ class JacobianWCS(LocalWCS):
         u = dudx x + dudy y
         v = dvdx x + dvdy y
 
-    A JacobianWCS has attributes dudx, dudy, dvdx, dvdy that you can access directly if that 
-    is convenient.  You can also access these as a NumPy array directly with 
+    A JacobianWCS has attributes dudx, dudy, dvdx, dvdy that you can access directly if that
+    is convenient.  You can also access these as a NumPy array directly with
 
         >>> J = jac_wcs.getMatrix()
 
@@ -1275,7 +1381,7 @@ class JacobianWCS(LocalWCS):
 
         >>> scale, shear, theta, flip = jac_wcs.getDecomposition()
 
-    will return the equivalent expansion, shear, rotation and possible flip corresponding to 
+    will return the equivalent expansion, shear, rotation and possible flip corresponding to
     this transformation.  See the docstring for that method for more information.
 
     Initialization
@@ -1294,9 +1400,9 @@ class JacobianWCS(LocalWCS):
     _opt_params = {}
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, dudx, dudy, dvdx, dvdy):
+        self._color = None
         self._dudx = dudx
         self._dudy = dudy
         self._dvdx = dvdx
@@ -1314,36 +1420,37 @@ class JacobianWCS(LocalWCS):
     def dvdy(self): return self._dvdy
 
     @property
-    def origin(self): return galsim.PositionD(0,0)
+    def origin(self): return PositionD(0,0)
     @property
-    def world_origin(self): return galsim.PositionD(0,0)
+    def world_origin(self): return PositionD(0,0)
 
-    def _u(self, x, y):
+    def _u(self, x, y, color=None):
         return self._dudx * x + self._dudy * y
 
-    def _v(self, x, y):
+    def _v(self, x, y, color=None):
         return self._dvdx * x + self._dvdy * y
 
-    def _x(self, u, v):
+    def _x(self, u, v, color=None):
         #  J = ( dudx  dudy )
         #      ( dvdx  dvdy )
         #  J^-1 = (1/det) (  dvdy  -dudy )
         #                 ( -dvdx   dudx )
         return (self._dvdy * u - self._dudy * v)/self._det
 
-    def _y(self, u, v):
+    def _y(self, u, v, color=None):
         return (-self._dvdx * u + self._dudx * v)/self._det
 
     def _profileToWorld(self, image_profile):
-        ret = image_profile.transform(self._dudx, self._dudy, self._dvdx, self._dvdy)
-        ret /= self._pixelArea()
-        return ret
+        from .transform import _Transform
+        return _Transform(image_profile, (self._dudx, self._dudy, self._dvdx, self._dvdy),
+                          flux_ratio=1./self._pixelArea())
 
     def _profileToImage(self, world_profile):
-        ret = world_profile.transform(self._dvdy/self._det, -self._dudy/self._det,
-                                      -self._dvdx/self._det, self._dudx/self._det)
-        ret *= self._pixelArea()
-        return ret
+        from .transform import _Transform
+        return _Transform(world_profile,
+                          (self._dvdy/self._det, -self._dudy/self._det,
+                           -self._dvdx/self._det, self._dudx/self._det),
+                          flux_ratio=self._pixelArea())
 
     def _pixelArea(self):
         return abs(self._det)
@@ -1354,42 +1461,42 @@ class JacobianWCS(LocalWCS):
                 numpy.array( [[ dudx, dudy ],
                               [ dvdx, dvdy ]] )
         """
-        import numpy
-        return numpy.array( [[ self._dudx, self._dudy ],
-                             [ self._dvdx, self._dvdy ]] )
+        return np.array( [[ self._dudx, self._dudy ],
+                          [ self._dvdx, self._dvdy ]] )
 
     def getDecomposition(self):
-        """Get the equivalent expansion, shear, rotation and possible flip corresponding to 
+        """Get the equivalent expansion, shear, rotation and possible flip corresponding to
         this Jacobian transformation.
 
-        A non-singular real matrix can always be decomposed into a symmetric positive definite 
+        A non-singular real matrix can always be decomposed into a symmetric positive definite
         matrix times an orthogonal matrix:
-        
+
             M = P Q
 
         In our case, P includes an overall scale and a shear, and Q is a rotation and possibly
         a flip of (x,y) -> (y,x).
 
             ( dudx  dudy ) = scale/sqrt(1-g1^2-g2^2) ( 1+g1  g2  ) ( cos(theta)  -sin(theta) ) F
-            ( dvdx  dvdy )                           (  g2  1-g2 ) ( sin(theta)   cos(theta) )
+            ( dvdx  dvdy )                           (  g2  1-g1 ) ( sin(theta)   cos(theta) )
 
         where F is either the identity matrix, ( 1 0 ), or a flip matrix, ( 0 1 ).
                                                ( 0 1 )                    ( 1 0 )
 
-        If there is no flip, then this means that the effect of 
-        
+        If there is no flip, then this means that the effect of
+
             >>> prof.transform(dudx, dudy, dvdx, dvdy)
 
-        is equivalent to 
+        is equivalent to
 
             >>> prof.rotate(theta).shear(shear).expand(scale)
 
         in that order.  (Rotation and shear do not commute.)
 
-        The decomposition is returned as a tuple: (scale, shear, theta, flip), where scale is a 
+        The decomposition is returned as a tuple: (scale, shear, theta, flip), where scale is a
         float, shear is a Shear, theta is an Angle, and flip is a bool.
         """
         import math
+        from .angle import radians
         # First we need to see whether or not the transformation includes a flip.  The evidence
         # for a flip is that the determinant is negative.
         if self._det == 0.:
@@ -1409,7 +1516,7 @@ class JacobianWCS(LocalWCS):
             dvdx = self._dvdx
             dvdy = self._dvdy
 
-        # A small bit of algebraic manipulations yield the following two equations that let us 
+        # A small bit of algebraic manipulations yield the following two equations that let us
         # determine theta:
         #
         # (dudx + dvdy) = 2 scale/sqrt(1-g^2) cos(t)
@@ -1417,7 +1524,7 @@ class JacobianWCS(LocalWCS):
 
         C = dudx + dvdy
         S = dvdx - dudy
-        theta = math.atan2(S,C) * galsim.radians
+        theta = math.atan2(S,C) * radians
 
         # The next step uses the following equations that you can get from a bit more algebra:
         #
@@ -1431,12 +1538,12 @@ class JacobianWCS(LocalWCS):
         g1 = C*(dudx-dvdy) - S*(dudy+dvdx)
         g2 = S*(dudx-dvdy) + C*(dudy+dvdx)
 
-        return scale, galsim.Shear(g1=g1, g2=g2), theta, flip
+        return scale, Shear(g1=g1, g2=g2), theta, flip
 
     def _minScale(self):
         import math
         # min scale is scale * (1-|g|) / sqrt(1-|g|^2)
-        # We could get this from the decomposition, but some algebra finds that this 
+        # We could get this from the decomposition, but some algebra finds that this
         # reduces to the following calculation:
         # NB: The unit tests test for the equivalence with the above formula.
         h1 = math.sqrt( (self._dudx + self._dvdy)**2 + (self._dudy - self._dvdx)**2 )
@@ -1492,10 +1599,10 @@ class JacobianWCS(LocalWCS):
 
 #########################################################################################
 #
-# Non-local UniformWCS classes are those where (x,y) = (0,0) does not (necessarily) 
+# Non-local UniformWCS classes are those where (x,y) = (0,0) does not (necessarily)
 # correspond to (u,v) = (0,0).
 #
-# We have the following non-local UniformWCS classes: 
+# We have the following non-local UniformWCS classes:
 #
 #     OffsetWCS
 #     OffsetShearWCS
@@ -1533,35 +1640,22 @@ class OffsetWCS(UniformWCS):
 
     @param scale          The pixel scale, typically in units of arcsec/pixel.
     @param origin         Optional origin position for the image coordinate system.
-                          If provided, it should be a PositionD or PositionI. 
+                          If provided, it should be a PositionD or PositionI.
                           [default: PositionD(0., 0.)]
     @param world_origin   Optional origin position for the world coordinate system.
-                          If provided, it should be a PositionD. 
+                          If provided, it should be a PositionD.
                           [default: galsim.PositionD(0., 0.)]
     """
     _req_params = { "scale" : float }
-    _opt_params = { "origin" : galsim.PositionD, "world_origin": galsim.PositionD }
+    _opt_params = { "origin" : PositionD, "world_origin": PositionD }
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, scale, origin=None, world_origin=None):
+        self._color = None
+        self._set_origin(origin, world_origin)
         self._scale = scale
         self._local_wcs = PixelScale(scale)
-        if origin is None:
-            self._origin = galsim.PositionD(0,0)
-        else:
-            if isinstance(origin, galsim.PositionI):
-                origin = galsim.PositionD(origin.x, origin.y)
-            elif not isinstance(origin, galsim.PositionD):
-                raise TypeError("origin must be a PositionD or PositionI argument")
-            self._origin = origin
-        if world_origin is None:
-            self._world_origin = galsim.PositionD(0,0)
-        else:
-            if not isinstance(world_origin, galsim.PositionD):
-                raise TypeError("world_origin must be a PositionD argument")
-            self._world_origin = world_origin
 
     @property
     def scale(self): return self._scale
@@ -1590,7 +1684,7 @@ class OffsetWCS(UniformWCS):
         y0 = header["GS_Y0"]
         u0 = header["GS_U0"]
         v0 = header["GS_V0"]
-        return OffsetWCS(scale, galsim.PositionD(x0,y0), galsim.PositionD(u0,v0))
+        return OffsetWCS(scale, PositionD(x0,y0), PositionD(u0,v0))
 
     def _newOrigin(self, origin, world_origin):
         return OffsetWCS(self._scale, origin, world_origin)
@@ -1631,32 +1725,18 @@ class OffsetShearWCS(UniformWCS):
                           If provided, it should be a PositionD.
                           [default: PositionD(0., 0.)]
     """
-    _req_params = { "scale" : float, "shear" : galsim.Shear }
-    _opt_params = { "origin" : galsim.PositionD, "world_origin": galsim.PositionD }
+    _req_params = { "scale" : float, "shear" : Shear }
+    _opt_params = { "origin" : PositionD, "world_origin": PositionD }
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, scale, shear, origin=None, world_origin=None):
+        self._color = None
+        self._set_origin(origin, world_origin)
         # The shear stuff is not too complicated, but enough so that it is worth
         # encapsulating in the ShearWCS class.  So here, we just create one of those
         # and we'll pass along any shear calculations to that.
         self._local_wcs = ShearWCS(scale, shear)
-        if origin is None:
-            self._origin = galsim.PositionD(0,0)
-        else:
-            if isinstance(origin, galsim.PositionI):
-                origin = galsim.PositionD(origin.x, origin.y)
-            elif not isinstance(origin, galsim.PositionD):
-                raise TypeError("origin must be a PositionD or PositionI argument")
-            self._origin = origin
-        if world_origin is None:
-            self._world_origin = galsim.PositionD(0,0)
-        else:
-            if not isinstance(world_origin, galsim.PositionD):
-                raise TypeError("world_origin must be a PositionD argument")
-            self._world_origin = world_origin
-
 
     @property
     def scale(self): return self._local_wcs.scale
@@ -1667,7 +1747,7 @@ class OffsetShearWCS(UniformWCS):
     def origin(self): return self._origin
     @property
     def world_origin(self): return self._world_origin
-    
+
     def _writeHeader(self, header, bounds):
         header["GS_WCS"] = ("OffsetShearWCS", "GalSim WCS name")
         header["GS_SCALE"] = (self.scale, "GalSim image scale")
@@ -1688,8 +1768,7 @@ class OffsetShearWCS(UniformWCS):
         y0 = header["GS_Y0"]
         u0 = header["GS_U0"]
         v0 = header["GS_V0"]
-        return OffsetShearWCS(scale, galsim.Shear(g1=g1, g2=g2), galsim.PositionD(x0,y0),
-                              galsim.PositionD(u0,v0))
+        return OffsetShearWCS(scale, Shear(g1=g1, g2=g2), PositionD(x0,y0), PositionD(u0,v0))
 
     def _newOrigin(self, origin, world_origin):
         return OffsetShearWCS(self.scale, self.shear, origin, world_origin)
@@ -1715,7 +1794,7 @@ class AffineTransform(UniformWCS):
         u = dudx (x-x0) + dudy (y-y0) + u0
         v = dvdx (x-x0) + dvdy (y-y0) + v0
 
-    An AffineTransform has attributes dudx, dudy, dvdx, dvdy, x0, y0, u0, v0 that you can 
+    An AffineTransform has attributes dudx, dudy, dvdx, dvdy, x0, y0, u0, v0 that you can
     access directly if that is convenient.
 
     Initialization
@@ -1737,28 +1816,15 @@ class AffineTransform(UniformWCS):
                           [default: PositionD(0., 0.)]
     """
     _req_params = { "dudx" : float, "dudy" : float, "dvdx" : float, "dvdy" : float }
-    _opt_params = { "origin" : galsim.PositionD, "world_origin": galsim.PositionD }
+    _opt_params = { "origin" : PositionD, "world_origin": PositionD }
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, dudx, dudy, dvdx, dvdy, origin=None, world_origin=None):
+        self._color = None
+        self._set_origin(origin, world_origin)
         # As with OffsetShearWCS, we store a JacobianWCS, rather than reimplement everything.
         self._local_wcs = JacobianWCS(dudx, dudy, dvdx, dvdy)
-        if origin is None:
-            self._origin = galsim.PositionD(0,0)
-        else:
-            if isinstance(origin, galsim.PositionI):
-                origin = galsim.PositionD(origin.x, origin.y)
-            elif not isinstance(origin, galsim.PositionD):
-                raise TypeError("origin must be a PositionD or PositionI argument")
-            self._origin = origin
-        if world_origin is None:
-            self._world_origin = galsim.PositionD(0,0)
-        else:
-            if not isinstance(world_origin, galsim.PositionD):
-                raise TypeError("world_origin must be a PositionD argument")
-            self._world_origin = world_origin
 
     @property
     def dudx(self): return self._local_wcs.dudx
@@ -1773,7 +1839,7 @@ class AffineTransform(UniformWCS):
     def origin(self): return self._origin
     @property
     def world_origin(self): return self._world_origin
- 
+
     def _writeHeader(self, header, bounds):
         header["GS_WCS"] = ("AffineTransform", "GalSim WCS name")
         return self._writeLinearWCS(header, bounds)
@@ -1811,8 +1877,7 @@ class AffineTransform(UniformWCS):
         u0 = header.get("CRVAL1",0.)
         v0 = header.get("CRVAL2",0.)
 
-        return AffineTransform(dudx, dudy, dvdx, dvdy, galsim.PositionD(x0,y0),
-                               galsim.PositionD(u0,v0))
+        return AffineTransform(dudx, dudy, dvdx, dvdy, PositionD(x0,y0), PositionD(u0,v0))
 
     def _newOrigin(self, origin, world_origin):
         return AffineTransform(self.dudx, self.dudy, self.dvdx, self.dvdy,
@@ -1823,7 +1888,7 @@ class AffineTransform(UniformWCS):
                                self.origin, self.world_origin)
 
     def __repr__(self):
-        return ("galsim.AffineTransform(%r, %r, %r, %r, %r, %r)")%(
+        return ("galsim.AffineTransform(%r, %r, %r, %r, origin=%r, world_origin=%r)")%(
                 self.dudx, self.dudy, self.dvdx, self.dvdy, self.origin, self.world_origin)
     def __hash__(self): return hash(repr(self))
 
@@ -1865,10 +1930,10 @@ class AffineTransform(UniformWCS):
 #########################################################################################
 
 
-# Some helper functions for serializing arbitrary functions.  Used by both UVFunction and 
+# Some helper functions for serializing arbitrary functions.  Used by both UVFunction and
 # RaDecFunction.
 def _writeFuncToHeader(func, letter, header):
-    if isinstance(func, basestring):
+    if isinstance(func, str):
         # If we have the string version, then just write that
         s = func
         first_key = 'GS_'+letter+'_STR'
@@ -1878,30 +1943,43 @@ def _writeFuncToHeader(func, letter, header):
         # I got the starting point for this code from:
         #     http://stackoverflow.com/questions/1253528/
         # In particular, marshal can serialize arbitrary code. (!)
-        import types, cPickle, marshal, base64
+        try:
+            import cPickle as pickle
+        except ImportError:
+            import pickle
+        import types, marshal, base64
         if type(func) == types.FunctionType:
-            code = marshal.dumps(func.func_code)
-            name = func.func_name
-            defaults = func.func_defaults
+            try:
+                # Python3 and usually Python2
+                code = marshal.dumps(func.__code__)
+                name = func.__name__
+                defaults = func.__defaults__
+                closure = func.__closure__
+            except AttributeError:  # pragma: no cover
+                # Older Python2 syntax, just in case.
+                code = marshal.dumps(func.func_code)
+                name = func.func_name
+                defaults = func.func_defaults
+                closure = func.func_closure
 
             # Functions may also have something called closure cells.  If there are any, we need
             # to include them as well.  Help for this part came from:
             # http://stackoverflow.com/questions/573569/
-            if func.func_closure:
+            if closure:
                 from types import ModuleType
-                closure = []
-                for c in func.func_closure:
+                closure_list = []
+                for c in closure:
                     if isinstance(c.cell_contents, ModuleType):
                         # Can't really pickle the modules.  e.g. math if they use math functions.
-                        # The modules just need to be loaded on the other side.  But we still need 
+                        # The modules just need to be loaded on the other side.  But we still need
                         # to make a cell for the module closure item, so just use its name and
                         # mark it as a module so we can recover it correctly.
-                        closure.append( 'module_'+c.cell_contents.__name__ )
+                        closure_list.append( 'module_'+c.cell_contents.__name__ )
                     else:
-                        closure.append( c.cell_contents )
+                        closure_list.append( c.cell_contents )
             else:
-                closure = None
-            all = (0,code,name,defaults,closure)
+                closure_list = None
+            all = (0,code,name,defaults,closure_list)
         else:
             # For things other than regular functions, we can try to pickle it directly, but
             # it might not work.  Let pickle raise the appropriate error if it fails.
@@ -1912,7 +1990,7 @@ def _writeFuncToHeader(func, letter, header):
             all = (1,func)
 
         # Now we can use pickle to serialize the full thing.
-        s = cPickle.dumps(all)
+        s = pickle.dumps(all)
 
         # Fits can't handle arbitrary strings.  Shrink to a base-64 alphabet that is printable.
         # (This is like UUencoding for those of you who remember that...)
@@ -1924,7 +2002,7 @@ def _writeFuncToHeader(func, letter, header):
 
     # Fits header strings cannot be more than 68 characters long, so split it up.
     fits_len = 68
-    n = (len(s)-1)/fits_len + 1
+    n = (len(s)-1)//fits_len + 1
     s_array = [ s[i*fits_len:(i+1)*fits_len] for i in range(n) ]
 
     # The total number of string splits is stored in fits key GS_U_N.
@@ -1938,13 +2016,17 @@ def _writeFuncToHeader(func, letter, header):
 
 def _makecell(value):
     # This is a little trick to make a closure cell.
-    # We make a function that has the given value in closure, then then get the 
+    # We make a function that has the given value in closure, then then get the
     # first (only) closure item, which will be the closure cell we need.
-    return (lambda : value).func_closure[0]
+    return (lambda : value).__closure__[0]
 
 def _readFuncFromHeader(letter, header):
     # This undoes the process of _writeFuncToHeader.  See the comments in that code for details.
-    import types, cPickle, marshal, base64, types
+    try:
+        import cPickle as pickle
+    except ImportError:
+        import pickle
+    import types, marshal, base64
     if 'GS_'+letter+'_STR' in header:
         # Read in a regular string
         n = header["GS_" + letter + "_N"]
@@ -1963,7 +2045,7 @@ def _readFuncFromHeader(letter, header):
             else: key = 'GS_%s%04d'%(letter,i)
             s += header[key]
         s = base64.b64decode(s)
-        all = cPickle.loads(s)
+        all = pickle.loads(s)
         type_code = all[0]
         if type_code == 0:
             code_str, name, defaults, closure_items = all[1:]
@@ -1973,7 +2055,7 @@ def _readFuncFromHeader(letter, header):
             else:
                 closure = []
                 for value in closure_items:
-                    if isinstance(value,basestring) and value.startswith('module_'):
+                    if isinstance(value,str) and value.startswith('module_'):
                         module_name = value[7:]
                         closure.append(_makecell(__import__(module_name)))
                     else:
@@ -1994,13 +2076,13 @@ class UVFunction(EuclideanWCS):
         - python objects with a __call__ method that takes (x,y) arguments
         - strings which can be parsed with eval('lambda x,y: '+str)
 
-    You may also provide the inverse functions x(u,v) and y(u,v) as xfunc and yfunc. 
-    These are not required, but if you do not provide them, then any operation that requires 
+    You may also provide the inverse functions x(u,v) and y(u,v) as xfunc and yfunc.
+    These are not required, but if you do not provide them, then any operation that requires
     going from world to image coordinates will raise a NotImplementedError.
 
     Note: some internal calculations will be faster if the functions can take NumPy arrays
-    for x,y and output arrays for u,v.  Usually this does not require any change to your 
-    function, but it is worth keeping in mind.  For example, if you want to do a sqrt, you 
+    for x,y and output arrays for u,v.  Usually this does not require any change to your
+    function, but it is worth keeping in mind.  For example, if you want to do a sqrt, you
     may be better off using `numpy.sqrt` rather than `math.sqrt`.
 
     Initialization
@@ -2010,71 +2092,75 @@ class UVFunction(EuclideanWCS):
 
         >>> wcs = galsim.UVFunction(ufunc, vfunc, origin=None, world_origin=None)
 
-    @param ufunc          The function u(x,y)
-    @param vfunc          The function v(x,y)
-    @param xfunc          The function x(u,v) (optional)
-    @param yfunc          The function y(u,v) (optional)
-    @param origin         Optional origin position for the image coordinate system.
-                          If provided, it should be a PositionD or PositionI.
-                          [default: PositionD(0., 0.)]
-    @param world_origin   Optional origin position for the world coordinate system.
-                          If provided, it should be a PositionD.
-                          [default: PositionD(0., 0.)]
+    @param ufunc            The function u(x,y)
+    @param vfunc            The function v(x,y)
+    @param xfunc            The function x(u,v) (optional)
+    @param yfunc            The function y(u,v) (optional)
+    @param origin           Optional origin position for the image coordinate system.
+                            If provided, it should be a PositionD or PositionI.
+                            [default: PositionD(0., 0.)]
+    @param world_origin     Optional origin position for the world coordinate system.
+                            If provided, it should be a PositionD.
+                            [default: PositionD(0., 0.)]
+    @param uses_color       If True, then the functions take three parameters (x,y,c) or (u,v,c)
+                            where the third term is some kind of color value.  (The exact meaning
+                            of "color" here is user-defined. You just need to be consistent with
+                            the color values you use when using the wcs.) [default: False]
     """
     _req_params = { "ufunc" : str, "vfunc" : str }
     _opt_params = { "xfunc" : str, "yfunc" : str,
-                    "origin" : galsim.PositionD, "world_origin": galsim.PositionD }
+                    "origin" : PositionD, "world_origin": PositionD }
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
-    def __init__(self, ufunc, vfunc, xfunc=None, yfunc=None, origin=None, world_origin=None):
+    def __init__(self, ufunc, vfunc, xfunc=None, yfunc=None, origin=None, world_origin=None,
+                 uses_color=False):
+        self._color = None
+        self._set_origin(origin, world_origin)
 
         # Keep these to use in copies, etc.
         self._orig_ufunc = ufunc
         self._orig_vfunc = vfunc
         self._orig_xfunc = xfunc
         self._orig_yfunc = yfunc
+        self._uses_color = uses_color
 
         # Turn these into the real functions
         self._initialize_funcs()
 
-        if origin is None:
-            self._origin = galsim.PositionD(0,0)
-        else:
-            if isinstance(origin, galsim.PositionI):
-                origin = galsim.PositionD(origin.x, origin.y)
-            elif not isinstance(origin, galsim.PositionD):
-                raise TypeError("origin must be a PositionD or PositionI argument")
-            self._origin = origin
-        if world_origin is None:
-            self._world_origin = galsim.PositionD(0,0)
-        else:
-            if not isinstance(world_origin, galsim.PositionD):
-                raise TypeError("world_origin must be a PositionD argument")
-            self._world_origin = world_origin
-
     def _initialize_funcs(self):
-        import math  # In case needed by function evals
-        import numpy
-
-        if isinstance(self._orig_ufunc, basestring):
-            self._ufunc = eval('lambda x,y : ' + self._orig_ufunc)
+        import galsim
+        global galsim  # Because if a user's function used galsim, it's probably at global scoe.
+        from . import utilities
+        if isinstance(self._orig_ufunc, str):
+            if self._uses_color:
+                self._ufunc = utilities.math_eval('lambda x,y,c : ' + self._orig_ufunc)
+            else:
+                self._ufunc = utilities.math_eval('lambda x,y : ' + self._orig_ufunc)
         else:
             self._ufunc = self._orig_ufunc
 
-        if isinstance(self._orig_vfunc, basestring):
-            self._vfunc = eval('lambda x,y : ' + self._orig_vfunc)
+        if isinstance(self._orig_vfunc, str):
+            if self._uses_color:
+                self._vfunc = utilities.math_eval('lambda x,y,c : ' + self._orig_vfunc)
+            else:
+                self._vfunc = utilities.math_eval('lambda x,y : ' + self._orig_vfunc)
         else:
             self._vfunc = self._orig_vfunc
 
-        if isinstance(self._orig_xfunc, basestring):
-            self._xfunc = eval('lambda u,v : ' + self._orig_xfunc)
+        if isinstance(self._orig_xfunc, str):
+            if self._uses_color:
+                self._xfunc = utilities.math_eval('lambda u,v,c : ' + self._orig_xfunc)
+            else:
+                self._xfunc = utilities.math_eval('lambda u,v : ' + self._orig_xfunc)
         else:
             self._xfunc = self._orig_xfunc
 
-        if isinstance(self._orig_yfunc, basestring):
-            self._yfunc = eval('lambda u,v : ' + self._orig_yfunc)
+        if isinstance(self._orig_yfunc, str):
+            if self._uses_color:
+                self._yfunc = utilities.math_eval('lambda u,v,c : ' + self._orig_yfunc)
+            else:
+                self._yfunc = utilities.math_eval('lambda u,v : ' + self._orig_yfunc)
         else:
             self._yfunc = self._orig_yfunc
 
@@ -2092,51 +2178,56 @@ class UVFunction(EuclideanWCS):
     @property
     def world_origin(self): return self._world_origin
 
-    def _u(self, x, y):
-        import math
-        import numpy
-        return self._ufunc(x,y)
+    def _u(self, x, y, color=None):
+        if self._uses_color:
+            return self._ufunc(x,y,color)
+        else:
+            return self._ufunc(x,y)
 
-    def _v(self, x, y):
-        import math
-        import numpy
-        return self._vfunc(x,y)
+    def _v(self, x, y, color=None):
+        if self._uses_color:
+            return self._vfunc(x,y,color)
+        else:
+            return self._vfunc(x,y)
 
-    def _x(self, u, v):
+    def _x(self, u, v, color=None):
         if self._xfunc is None:
             raise NotImplementedError(
                 "World -> Image direction not implemented for this UVFunction")
         else:
-            import math
-            import numpy
-            return self._xfunc(u,v)
+            if self._uses_color:
+                return self._xfunc(u,v,color)
+            else:
+                return self._xfunc(u,v)
 
-    def _y(self, u, v):
+    def _y(self, u, v, color=None):
         if self._yfunc is None:
             raise NotImplementedError(
                 "World -> Image direction not implemented for this UVFunction")
         else:
-            import math
-            import numpy
-            return self._yfunc(u,v)
+            if self._uses_color:
+                return self._yfunc(u,v,color)
+            else:
+                return self._yfunc(u,v)
 
     def _newOrigin(self, origin, world_origin):
         return UVFunction(self._orig_ufunc, self._orig_vfunc, self._orig_xfunc, self._orig_yfunc,
-                          origin, world_origin)
- 
+                          origin, world_origin, self._uses_color)
+
     def _writeHeader(self, header, bounds):
         header["GS_WCS"]  = ("UVFunction", "GalSim WCS name")
         header["GS_X0"] = (self.origin.x, "GalSim image origin x")
         header["GS_Y0"] = (self.origin.y, "GalSim image origin y")
         header["GS_U0"] = (self.world_origin.x, "GalSim world origin u")
         header["GS_V0"] = (self.world_origin.y, "GalSim world origin v")
+        header["GS_COLOR"] = (int(self._uses_color), "GalSim wcs uses color?")
 
         _writeFuncToHeader(self._orig_ufunc, 'U', header)
         _writeFuncToHeader(self._orig_vfunc, 'V', header)
         _writeFuncToHeader(self._orig_xfunc, 'X', header)
         _writeFuncToHeader(self._orig_yfunc, 'Y', header)
 
-        return self.affine(bounds.trueCenter())._writeLinearWCS(header, bounds)
+        return self.affine(bounds.true_center)._writeLinearWCS(header, bounds)
 
     @staticmethod
     def _readHeader(header):
@@ -2144,16 +2235,17 @@ class UVFunction(EuclideanWCS):
         y0 = header["GS_Y0"]
         u0 = header["GS_U0"]
         v0 = header["GS_V0"]
+        uses_color = bool(header["GS_COLOR"])
         ufunc = _readFuncFromHeader('U', header)
         vfunc = _readFuncFromHeader('V', header)
         xfunc = _readFuncFromHeader('X', header)
         yfunc = _readFuncFromHeader('Y', header)
-        return UVFunction(ufunc, vfunc, xfunc, yfunc, galsim.PositionD(x0,y0),
-                          galsim.PositionD(u0,v0))
+        return UVFunction(ufunc, vfunc, xfunc, yfunc, PositionD(x0,y0),
+                          PositionD(u0,v0), uses_color)
 
     def copy(self):
         return UVFunction(self._orig_ufunc, self._orig_vfunc, self._orig_xfunc, self._orig_yfunc,
-                          self.origin, self.world_origin)
+                          self.origin, self.world_origin, self._uses_color)
 
     def __eq__(self, other):
         return ( isinstance(other, UVFunction) and
@@ -2162,12 +2254,13 @@ class UVFunction(EuclideanWCS):
                  self._orig_xfunc == other._orig_xfunc and
                  self._orig_yfunc == other._orig_yfunc and
                  self.origin == other.origin and
-                 self.world_origin == other.world_origin )
+                 self.world_origin == other.world_origin and
+                 self._uses_color == other._uses_color)
 
     def __repr__(self):
-        return ("galsim.UVFunction(%r, %r, %r, %r, %r, %r)")%(
+        return ("galsim.UVFunction(%r, %r, %r, %r, %r, %r, %r)")%(
                 self._orig_ufunc, self._orig_vfunc, self._orig_xfunc, self._orig_yfunc,
-                self.origin, self.world_origin)
+                self.origin, self.world_origin, self._uses_color)
 
     def __hash__(self): return hash(repr(self))
 
@@ -2188,8 +2281,8 @@ class RaDecFunction(CelestialWCS):
     """This WCS takes an arbitrary function for the Right Ascension (ra) and Declination (dec).
 
     In many cases, it can be more convenient to calculate both ra and dec in a single function,
-    since there will typically be intermediate values that are common to both, so it may be more 
-    efficient to just calculate those once and thence calculate both ra and dec.  Thus, we 
+    since there will typically be intermediate values that are common to both, so it may be more
+    efficient to just calculate those once and thence calculate both ra and dec.  Thus, we
     provide the option to provide either a single function or two separate functions.
 
     The function parameters used to initialize an RaDecFunction may be:
@@ -2202,9 +2295,9 @@ class RaDecFunction(CelestialWCS):
     The first argument is called `ra_func`, but if `dec_func` is omitted, then it is assumed
     to calculate both ra and dec.  The two values should be returned as a tuple (ra,dec).
 
-    We don't want a function that returns Angles, because we want to allow for the 
-    possibility of using NumPy arrays as inputs and outputs to speed up some calculations.  The 
-    function isn't _required_ to work with NumPy arrays, but it is possible that some things 
+    We don't want a function that returns Angles, because we want to allow for the
+    possibility of using NumPy arrays as inputs and outputs to speed up some calculations.  The
+    function isn't _required_ to work with NumPy arrays, but it is possible that some things
     will be faster if it does.  If it were expected to return Angles, then it definitely
     couldn't work with arrays.
 
@@ -2227,12 +2320,13 @@ class RaDecFunction(CelestialWCS):
                         [default: PositionD(0., 0.)]
     """
     _req_params = { "ra_func" : str, "dec_func" : str }
-    _opt_params = { "origin" : galsim.PositionD }
+    _opt_params = { "origin" : PositionD }
     _single_params = []
     _takes_rng = False
-    _takes_logger = False
 
     def __init__(self, ra_func, dec_func=None, origin=None):
+        self._color = None
+        self._set_origin(origin)
 
         # Keep these to use in copies, etc.
         self._orig_ra_func = ra_func
@@ -2241,31 +2335,22 @@ class RaDecFunction(CelestialWCS):
         # Turn these into the real functions
         self._initialize_funcs()
 
-        if origin is None:
-            self._origin = galsim.PositionD(0,0)
-        else:
-            if isinstance(origin, galsim.PositionI):
-                origin = galsim.PositionD(origin.x, origin.y)
-            elif not isinstance(origin, galsim.PositionD):
-                raise TypeError("origin must be a PositionD or PositionI argument")
-            self._origin = origin
-
     def _initialize_funcs(self):
-        import math  # In case needed by function evals
-        import numpy
-
+        import galsim
+        global galsim  # Because if a user's function used galsim, it's probably at global scoe.
+        from . import utilities
         if self._orig_dec_func is None:
-            if isinstance(self._orig_ra_func, basestring):
-                self._radec_func = eval('lambda x,y : ' + self._orig_ra_func)
+            if isinstance(self._orig_ra_func, str):
+                self._radec_func = utilities.math_eval('lambda x,y : ' + self._orig_ra_func)
             else:
                 self._radec_func = self._orig_ra_func
         else:
-            if isinstance(self._orig_ra_func, basestring):
-                ra_func = eval('lambda x,y : ' + self._orig_ra_func)
+            if isinstance(self._orig_ra_func, str):
+                ra_func = utilities.math_eval('lambda x,y : ' + self._orig_ra_func)
             else:
                 ra_func = self._orig_ra_func
-            if isinstance(self._orig_dec_func, basestring):
-                dec_func = eval('lambda x,y : ' + self._orig_dec_func)
+            if isinstance(self._orig_dec_func, str):
+                dec_func = utilities.math_eval('lambda x,y : ' + self._orig_dec_func)
             else:
                 dec_func = self._orig_dec_func
             self._radec_func = lambda x,y : (ra_func(x,y), dec_func(x,y))
@@ -2276,17 +2361,15 @@ class RaDecFunction(CelestialWCS):
     @property
     def origin(self): return self._origin
 
-    def _radec(self, x, y):
-        import math
-        import numpy
+    def _radec(self, x, y, color=None):
         return self._radec_func(x,y)
 
-    def _xy(self, ra, dec):
+    def _xy(self, ra, dec, color=None):
         raise NotImplementedError("World -> Image direction not implemented for RaDecFunction")
 
     def _newOrigin(self, origin):
         return RaDecFunction(self._orig_ra_func, self._orig_dec_func, origin)
- 
+
     def _writeHeader(self, header, bounds):
         header["GS_WCS"]  = ("RaDecFunction", "GalSim WCS name")
         header["GS_X0"] = (self.origin.x, "GalSim image origin x")
@@ -2295,7 +2378,7 @@ class RaDecFunction(CelestialWCS):
         _writeFuncToHeader(self._orig_ra_func, 'R', header)
         _writeFuncToHeader(self._orig_dec_func, 'D', header)
 
-        return self.affine(bounds.trueCenter())._writeLinearWCS(header, bounds)
+        return self.affine(bounds.true_center)._writeLinearWCS(header, bounds)
 
     @staticmethod
     def _readHeader(header):
@@ -2303,7 +2386,7 @@ class RaDecFunction(CelestialWCS):
         y0 = header["GS_Y0"]
         ra_func = _readFuncFromHeader('R', header)
         dec_func = _readFuncFromHeader('D', header)
-        return RaDecFunction(ra_func, dec_func, galsim.PositionD(x0,y0))
+        return RaDecFunction(ra_func, dec_func, PositionD(x0,y0))
 
     def copy(self):
         return RaDecFunction(self._orig_ra_func, self._orig_dec_func, self.origin)
@@ -2329,4 +2412,13 @@ class RaDecFunction(CelestialWCS):
         self.__dict__ = d
         self._initialize_funcs()
 
-
+def compatible(wcs1, wcs2):
+    """
+    A utility to check the compatibility of two WCS.  In particular, if two WCS are consistent with
+    each other modulo a shifted origin, we consider them to be compatible, even though they are not
+    equal.
+    """
+    if wcs1.isUniform() and wcs2.isUniform():
+        return wcs1.jacobian() == wcs2.jacobian()
+    else:
+        return wcs1 == wcs2.withOrigin(wcs1.origin, wcs1.world_origin)

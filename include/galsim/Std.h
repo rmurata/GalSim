@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -23,15 +23,20 @@
 #define GalSim_Std_H
 
 #include <cmath>
-#define _USE_MATH_DEFINES  // To make sure M_PI is defined.
-// It should be in math.h, but not necessarily in cmath.
-#include <math.h>
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
 #include <string>
 #include <cassert>
 #include <stdexcept>
+#include <cstddef>
+
+#ifdef _WIN32
+#include <Windows.h>
+#else
+#include <sys/time.h>
+#endif
+
 
 // A nice memory checker if you need to track down some memory problem.
 #ifdef MEM_TEST
@@ -43,30 +48,70 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Bring either std::tr1::shared_ptr or std::shared_ptr into local namespace
+// cf. https://stackoverflow.com/questions/18831151/is-c-0x-tr1-safe-to-use-when-portability-matters
+#ifdef _LIBCPP_VERSION
+// using libc++
+
+#include <memory>
+using std::shared_ptr;
+
+#else  // !_LIBCPP_VERSION
+// not using libc++
+
+#include <tr1/memory>
+using std::tr1::shared_ptr;
+
+#endif  // _LIBCPP_VERSION
+
+// Check if ptr is aligned on 128 bit boundary
+inline bool IsAligned(const void* p) { return (reinterpret_cast<size_t>(p) & 0xf) == 0; }
+
 // Convenient debugging.
 // Use as a normal C++ stream:
 // dbg << "Here x = "<<x<<" and y = "<<y<<std::endl;
-// If DEBUGLOGGING is not enabled, the compiler optimizes it away, so it 
+// If DEBUGLOGGING is not enabled, the compiler optimizes it away, so it
 // doesn't take any CPU cycles.
 //
-// You need to define dbgout and verbose_level in the .cpp file with main().
-// And if you are using OpenMP, you can get debugging output from each thread into
-// a separate file by calling SetupThreadDebug(name).
-// Then each thread other than the main thread will actually write to a file 
-// name_threadnum and not clobber each other.  (The main thread will write to name.)
 
-//#define DEBUGLOGGING
 #ifdef DEBUGLOGGING
-extern std::ostream* dbgout;
-extern int verbose_level;
-#define dbg if(dbgout && verbose_level >= 1) (*dbgout)
-#define xdbg if(dbgout && verbose_level >= 2) (*dbgout)
-#define xxdbg if(dbgout && verbose_level >= 3) (*dbgout)
+class Debugger // Use a Singleton model so it can be included multiple times.
+{
+public:
+    std::ostream& get_dbgout() { return *dbgout; }
+    void set_dbgout(std::ostream* new_dbgout) { dbgout = new_dbgout; }
+    void set_verbose(int level) { verbose_level = level; }
+    bool do_level(int level) { return verbose_level >= level; }
+    int get_level() { return verbose_level; }
+
+    static Debugger& instance()
+    {
+        static Debugger _instance;
+        return _instance;
+    }
+
+private:
+    std::ostream* dbgout;
+    int verbose_level;
+
+    Debugger() : dbgout(&std::cout), verbose_level(1) {}
+    Debugger(const Debugger&);
+    void operator=(const Debugger&);
+};
+
+#define dbg if(Debugger::instance().do_level(1)) Debugger::instance().get_dbgout()
+#define xdbg if(Debugger::instance().do_level(2)) Debugger::instance().get_dbgout()
+#define xxdbg if(Debugger::instance().do_level(3)) Debugger::instance().get_dbgout()
+#define set_dbgout(dbgout) Debugger::instance().set_dbgout(dbgout)
+#define set_verbose(level) Debugger::instance().set_verbose(level)
+#define verbose_level Debugger::instance().get_level()
 #define xassert(x) assert(x)
 #else
 #define dbg if(false) (std::cerr)
 #define xdbg if(false) (std::cerr)
 #define xxdbg if(false) (std::cerr)
+#define set_dbgout(dbgout)
+#define set_verbose(level)
 #define xassert(x)
 #endif
 
@@ -74,7 +119,7 @@ extern int verbose_level;
 // include double or int information as well.
 // e.g. FormatAndThrow<std::runtime_error>() << "x = "<<x<<" is invalid.";
 template <class E=std::runtime_error>
-class FormatAndThrow 
+class FormatAndThrow
 {
 public:
     // OK, this is a bit weird, but mostly innocuous.  Mac's default gcc compiler for OSX >= 10.6
@@ -87,19 +132,103 @@ public:
     //     http://gcc.gnu.org/bugzilla/show_bug.cgi?id=53838
     //     https://trac.macports.org/ticket/35070
     //     https://code.google.com/p/googletest/issues/detail?id=189
-    // Anyway, my workaround is to initialize the string with a space and a backspace, which 
-    // should print as nothing, so it should have no apparent result, and it avoids the 
+    // Anyway, my workaround is to initialize the string with a space and a backspace, which
+    // should print as nothing, so it should have no apparent result, and it avoids the
     // attempted deallocation of the global empty string.
-    
+
     FormatAndThrow() : oss(" ") {}
 
     template <class T>
-    FormatAndThrow& operator<<(const T& t) 
+    FormatAndThrow& operator<<(const T& t)
     { oss << t; return *this; }
 
-    ~FormatAndThrow() { throw E(oss.str()); }
+    ~FormatAndThrow()
+#if __cplusplus >= 201103L
+        noexcept(false)
+#endif
+    { throw E(oss.str()); }
+
 private:
     std::ostringstream oss;
+};
+
+/*
+ *  A simple timer class to see how long a piece of code takes.
+ *  Usage:
+ *
+ *  {
+ *      static Timer timer("name");
+ *
+ *      ...
+ *
+ *      timer.start()
+ *      [ The code you want timed ]
+ *      timer.stop()
+ *
+ *      ...
+ *  }
+ *
+ *  At the end of execution, you will get output:
+ *
+ *  Time for name: xxx seconds
+ */
+class Timer
+{
+public:
+    Timer(std::string name, bool start_running=false) : _name(name), _accum(0), _running(false)
+    {
+        if (start_running) start();
+    }
+    ~Timer() { stop(); report(); }
+
+    void start() {
+        if (!_running) {
+            _start_time = GetTimeMicroseconds();
+            _running = true;
+        }
+    }
+    void stop() {
+        if (_running) {
+            unsigned long long stop_time = GetTimeMicroseconds();
+            _accum += stop_time - _start_time;
+            _running = false;
+        }
+    }
+    void report() { std::cout<<"Time for "<<_name<<": " << _accum / 1.e6 << " seconds\n"; }
+private:
+    // cf. http://stackoverflow.com/questions/1861294/how-to-calculate-execution-time-of-a-code-snippet-in-c
+    unsigned long long GetTimeMicroseconds()
+    {
+#ifdef _WIN32
+        /* Windows */
+        FILETIME ft;
+        LARGE_INTEGER li;
+
+        /* Get the amount of 100 nano seconds intervals elapsed since January 1, 1601 (UTC) and copy it
+         *   * to a LARGE_INTEGER structure. */
+        GetSystemTimeAsFileTime(&ft);
+        li.LowPart = ft.dwLowDateTime;
+        li.HighPart = ft.dwHighDateTime;
+
+        unsigned long long ret = li.QuadPart;
+        ret -= 116444736000000000LL; /* Convert from file time to UNIX epoch time. */
+        ret /= 10; /* From 100 nano seconds (10^-7) to 1 microsecond (10^-6) intervals */
+#else
+        /* Linux */
+        struct timeval tv;
+
+        gettimeofday(&tv, NULL);
+
+        unsigned long long ret = tv.tv_usec;
+        /* Adds the seconds (10^0) after converting them to microseconds (10^-6) */
+        ret += (tv.tv_sec * 1000000);
+#endif
+        return ret;
+    }
+    std::string _name;
+    long long _accum;
+    unsigned long long _start_time;
+    bool _running;
 };
 
 

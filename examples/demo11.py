@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -23,11 +23,11 @@ The eleventh script in our tutorial about using GalSim in python scripts: exampl
 
 This script uses a constant PSF from real data (an image read in from a bzipped FITS file, not a
 parametric model) and variable shear and magnification according to some cosmological model for
-which we have a tabulated power spectrum at specific k values only.  The 288 galaxies in the 0.1 x
-0.1 degree field (representing a number density of 8/arcmin^2) are randomly located and
+which we have a tabulated shear power spectrum at specific k values only.  The 288 galaxies in the
+0.11 x 0.11 degree field (representing a number density of 6/arcmin^2) are randomly located and
 permitted to overlap.  For the galaxies, we use a mix of real and parametric galaxies modeled off
 the COSMOS observations with the Hubble Space Telescope.  The real galaxies are similar to those
-used in demo10.  The parametric galaxies are based on parameter fits to the same observed galaxies.
+used in demo10.  The parametric galaxies are based on parametric fits to the same observed galaxies.
 The flux and size distribution are thus realistic for an I < 23.5 magnitude limited sample.
 
 New features introduced in this demo:
@@ -38,7 +38,7 @@ New features introduced in this demo:
 - psf = galsim.InterpolatedImage(psf_filename, scale, flux)
 - tab = galsim.LookupTable(file)
 - cosmos_cat = galsim.COSMOSCatalog(file_name, dir)
-- gal = cosmos_cat.makeGalaxy(index, gal_type, noise_pad_size, rng)
+- gal = cosmos_cat.makeGalaxy(gal_type, rng, noise_pad_size)
 - ps = galsim.PowerSpectrum(..., units)
 - gal = gal.lens(g1, g2, mu)
 - image.whitenNoise(correlated_noise)
@@ -65,8 +65,8 @@ import galsim
 def main(argv):
     """
     Make images using constant PSF and variable shear:
-      - The main image is 6 x 6 arcmin
-      - Pixel scale is 0.2 arcsec, hence the image is 1800 x 1800 pixels.
+      - The main image is 2048 x 2048 pixels.
+      - Pixel scale is 0.2 arcsec/pixel, hence the image is about 0.11 degrees on a side.
       - Applied shear is from a cosmological power spectrum read in from file.
       - The PSF is a real one from SDSS, and corresponds to a convolution of atmospheric PSF,
         optical PSF, and pixel response, which has been sampled at pixel centers.  We used a PSF
@@ -74,7 +74,7 @@ def main(argv):
         telescope. However, in order that the galaxy resolution not be too poor, we tell GalSim that
         the pixel scale for that PSF image is 0.2" rather than 0.396".  We are simultaneously lying
         about the intrinsic size of the PSF and about the pixel scale when we do this.
-      - The galxies come from COSMOSCatalog, which can produce either RealGalaxy profiles
+      - The galaxies come from COSMOSCatalog, which can produce either RealGalaxy profiles
         (like in demo10) and parametric fits to those profiles.  We choose 30% of the galaxies
         to use the images, and the other 60% to use the parametric fits
       - The real galaxy images include some initial correlated noise from the original HST
@@ -88,16 +88,17 @@ def main(argv):
     # Normally these would be read in from some parameter file.
 
     pixel_scale = 0.2                 # arcsec/pixel
-    image_size = 0.1 * galsim.degrees # size of full image in each dimension
-    image_size = int((image_size / galsim.arcsec) / pixel_scale) # convert to pixels
+    image_size = 2048                 # size of image in pixels
     image_size_arcsec = image_size*pixel_scale # size of big image in each dimension (arcsec)
     noise_variance = 5.e4             # ADU^2  (Just use simple Gaussian noise here.)
     nobj = 288                        # number of galaxies in entire field
-                                      # (This corresponds to 2 galaxies / arcmin^2)
-    grid_spacing = 90.0               # The spacing between the samples for the power spectrum 
+                                      # (This corresponds to 8 galaxies / arcmin^2)
+    grid_spacing = 90.0               # The spacing between the samples for the power spectrum
                                       # realization (arcsec)
     tel_diam = 4                      # Let's figure out the flux for a 4 m class telescope
     exp_time = 300                    # exposing for 300 seconds.
+    center_ra = 19.3*galsim.hours     # The RA, Dec of the center of the image on the sky
+    center_dec = -33.1*galsim.degrees
 
     # The catalog returns objects that are appropriate for HST in 1 second exposures.  So for our
     # telescope we scale up by the relative area and exposure time.  Note that what is important is
@@ -115,16 +116,16 @@ def main(argv):
     file_name = os.path.join('output','tabulated_power_spectrum.fits.fz')
 
     logger.info('Starting demo script 11')
- 
+
     # Read in galaxy catalog
-    # The COSMOSCatalog uses the same input file as we have been usign for RealGalaxyCatalogs
-    # along with a second file called real_galaxy_catalog_examples_fits.fits, which stores
+    # The COSMOSCatalog uses the same input file as we have been using for RealGalaxyCatalogs
+    # along with a second file called real_galaxy_catalog_23.5_examples_fits.fits, which stores
     # the information about the parameteric fits.  There is no need to specify the second file
     # name, since the name is derivable from the name of the main catalog.
     if True:
         # The catalog we distribute with the GalSim code only has 100 galaxies.
         # The galaxies will typically be reused several times here.
-        cat_file_name = 'real_galaxy_catalog_example.fits'
+        cat_file_name = 'real_galaxy_catalog_23.5_example.fits'
         dir = 'data'
         cosmos_cat = galsim.COSMOSCatalog(cat_file_name, dir=dir)
     else:
@@ -139,7 +140,7 @@ def main(argv):
     # GalSim works in the flat-sky approximation, so we use this notation interchangeably with
     # P(k).  GalSim does not calculate shear power spectra for users, who must be able to provide
     # their own (or use the examples in the repository).
-    # 
+    #
     # Here we use a tabulated power spectrum from iCosmo (http://icosmo.org), with the following
     # cosmological parameters and survey design:
     # H_0 = 70 km/s/Mpc
@@ -176,17 +177,17 @@ def main(argv):
     # Setup the image:
     full_image = galsim.ImageF(image_size, image_size)
 
-    # The default convention for indexing an image is to follow the FITS standard where the 
-    # lower-left pixel is called (1,1).  However, this can be counter-intuitive to people more 
-    # used to C or python indexing, where indices start at 0.  It is possible to change the 
+    # The default convention for indexing an image is to follow the FITS standard where the
+    # lower-left pixel is called (1,1).  However, this can be counter-intuitive to people more
+    # used to C or python indexing, where indices start at 0.  It is possible to change the
     # coordinates of the lower-left pixel with the methods `setOrigin`.  For this demo, we
     # switch to 0-based indexing, so the lower-left pixel will be called (0,0).
     full_image.setOrigin(0,0)
 
-    # As for demo10, we use random_seed+nobj for the random numbers required for the 
-    # whole image.  In this case, both the power spectrum realization and the noise on the 
+    # As for demo10, we use random_seed for the random numbers required for the
+    # whole image.  In this case, both the power spectrum realization and the noise on the
     # full image we apply later.
-    rng = galsim.BaseDeviate(random_seed+nobj)
+    rng = galsim.BaseDeviate(random_seed)
 
     # We want to make random positions within our image.  However, currently for shears from a power
     # spectrum we first have to get shears on a grid of positions, and then we can choose random
@@ -194,16 +195,8 @@ def main(argv):
     # image, with grid points spaced by 90 arcsec (hence interpolation only happens below 90"
     # scales, below the interesting scales on which we want the shear power spectrum to be
     # represented exactly).  The lensing engine wants positions in arcsec, so calculate that:
-
-    # Also, because of some technical details about how the config stuff handles the random
-    # number generator here, we need to duplicate the rng object if we want to have the 
-    # two output files match.  This means that technically, the same sequence of random numbers
-    # will be used in building the grid as will be used later to add noise.  But since they are
-    # used in such completely different ways, it is hard to imagine how this could lead to any
-    # kind of bias in the images.
     ps.buildGrid(grid_spacing = grid_spacing,
-                 ngrid = int(math.ceil(image_size_arcsec / grid_spacing)),
-                 rng = rng.duplicate())
+                 ngrid = int(math.ceil(image_size_arcsec / grid_spacing)), rng=rng)
     logger.info('Made gridded shears')
 
     # We keep track of how much noise is already in the image from the RealGalaxies.
@@ -216,18 +209,21 @@ def main(argv):
     theta = 0.17 * galsim.degrees
     # ( dudx  dudy ) = ( cos(theta)  -sin(theta) ) * pixel_scale
     # ( dvdx  dvdy )   ( sin(theta)   cos(theta) )
-    dudx = math.cos(theta.rad()) * pixel_scale
-    dudy = -math.sin(theta.rad()) * pixel_scale
-    dvdx = math.sin(theta.rad()) * pixel_scale
-    dvdy = math.cos(theta.rad()) * pixel_scale
-    image_center = full_image.trueCenter()
-    affine = galsim.AffineTransform(dudx, dudy, dvdx, dvdy, origin=full_image.trueCenter())
+    # Aside: You can call numpy trig functions on Angle objects directly, rather than getting
+    #        their values in radians first.  Or, if you prefer, you can write things like
+    #        theta.sin() or theta.cos(), which are equivalent.
+    dudx = numpy.cos(theta) * pixel_scale
+    dudy = -numpy.sin(theta) * pixel_scale
+    dvdx = numpy.sin(theta) * pixel_scale
+    dvdy = numpy.cos(theta) * pixel_scale
+    image_center = full_image.true_center
+    affine = galsim.AffineTransform(dudx, dudy, dvdx, dvdy, origin=full_image.true_center)
 
     # We can also put it on the celestial sphere to give it a bit more realism.
     # The TAN projection takes a (u,v) coordinate system on a tangent plane and projects
-    # that plane onto the sky using a given point as the tangent point.  The tangent 
+    # that plane onto the sky using a given point as the tangent point.  The tangent
     # point should be given as a CelestialCoord.
-    sky_center = galsim.CelestialCoord(ra=19.3*galsim.hours, dec=-33.1*galsim.degrees)
+    sky_center = galsim.CelestialCoord(ra=center_ra, dec=center_dec)
 
     # The third parameter, units, defaults to arcsec, but we make it explicit here.
     # It sets the angular units of the (u,v) intermediate coordinate system.
@@ -238,30 +234,42 @@ def main(argv):
     for k in range(nobj):
         time1 = time.time()
         # The usual random number generator using a different seed for each galaxy.
-        ud = galsim.UniformDeviate(random_seed+k)
+        ud = galsim.UniformDeviate(random_seed+k+1)
 
-        # Choose a random position in the image
-        x = ud()*(image_size-1)
-        y = ud()*(image_size-1)
-        image_pos = galsim.PositionD(x,y)
+        # Choose a random RA, Dec around the sky_center.
+        # Note that for this to come out close to a square shape, we need to account for the
+        # cos(dec) part of the metric: ds^2 = dr^2 + r^2 d(dec)^2 + r^2 cos^2(dec) d(ra)^2
+        # So need to calculate dec first.
+        dec = center_dec + (ud()-0.5) * image_size_arcsec * galsim.arcsec
+        ra = center_ra + (ud()-0.5) * image_size_arcsec / numpy.cos(dec) * galsim.arcsec
+        world_pos = galsim.CelestialCoord(ra,dec)
 
-        # Turn this into a position in world coordinates
-        # We leave this in the (u,v) plane, since the PowerSpectrum class is really defined
-        # on the tangent plane, not in (ra,dec).
-        world_pos = affine.toWorld(image_pos)
-        
+        # We will need the image position as well, so use the wcs to get that
+        image_pos = wcs.toImage(world_pos)
+
+        # We also need this in the tangent plane, which we call "world coordinates" here,
+        # since the PowerSpectrum class is really defined on that plane, not in (ra,dec).
+        uv_pos = affine.toWorld(image_pos)
+
         # Get the reduced shears and magnification at this point
-        g1, g2, mu = ps.getLensing(pos = world_pos)
+        g1, g2, mu = ps.getLensing(pos = uv_pos)
 
         # Now we will have the COSMOSCatalog make a galaxy profile for us.  It can make either
         # a RealGalaxy using the original HST image and PSF, or a parametric model based on
         # parametric fits to the light distribution of the HST observation.  The parametric
         # models are either a Sersic fit to the data or a bulge + disk fit according to which
-        # one gave the better chisq value.
+        # one gave the better chisq value.  We will select a galaxy at random from the catalog.
+        # One could easily do this by choosing an index = int(ud() * cosmos_cat.nobjects), but
+        # we will instead allow the catalog to choose a random galaxy for us.  It will remove any
+        # selection effects involved in postage stamp creation using weights that are stored in
+        # the catalog.  (If for some reason you prefer not to do that, you can always choose a
+        # purely random index yourself using int(ud() * cosmos_cat.nobjects).)  We employ this
+        # random selection by simply failing to specify an index or identifier for a galaxy, in
+        # which case it chooses a random one.
 
         # First determine whether we will make a real galaxy (`gal_type = 'real'`) or a parametric
         # galaxy (`gal_type = 'parametric'`).  The real galaxies take longer to render, so for this
-        # script, we just use them 30% of the time and use parametric galaxies the other 70%. 
+        # script, we just use them 30% of the time and use parametric galaxies the other 70%.
 
         # We could just use `ud()<0.3` for this, but instead we introduce another Deviate type
         # available in GalSim that we haven't used yet: BinomialDeviate.
@@ -270,20 +278,17 @@ def main(argv):
         binom = galsim.BinomialDeviate(ud, N=1, p=0.3)
         real = binom()
 
-        # Next determine which index in the catalog we will use for this object.
-        index = int(ud() * cosmos_cat.nobjects)
-
         if real:
             # For real galaxies, we will want to whiten the noise in the image (below).
             # When whitening the image, we need to make sure the original correlated noise is
             # present throughout the whole image, otherwise the whitening will do the wrong thing
             # to the parts of the image that don't include the original image.  The RealGalaxy
             # stores the correct noise profile to use as the gal.noise attribute.  This noise
-            # profile is automatically updated as we shear, dilate, convolve, etc.  But we need to 
-            # tell it how large to pad with this noise by hand.  This is a bit complicated for the 
-            # code to figure out on its own, so we have to supply the size for noise padding 
+            # profile is automatically updated as we shear, dilate, convolve, etc.  But we need to
+            # tell it how large to pad with this noise by hand.  This is a bit complicated for the
+            # code to figure out on its own, so we have to supply the size for noise padding
             # with the noise_pad_size parameter.
-        
+
             # The large galaxies will render fine without any noise padding, but the postage stamp
             # for the smaller galaxies will be sized appropriately for the PSF, which may make the
             # stamp larger than the original galaxy image.  The psf image is 40 x 40, although
@@ -291,9 +296,9 @@ def main(argv):
             # to at least 40 x sqrt(2), we should be safe even if the galaxy image is rotated
             # with respect to the psf image.
             #     noise_pad_size = 40 * sqrt(2) * 0.2 arcsec/pixel = 11.3 arcsec
-            gal = cosmos_cat.makeGalaxy(index=index, gal_type='real', rng=ud, noise_pad_size=11.3)
+            gal = cosmos_cat.makeGalaxy(gal_type='real', rng=ud, noise_pad_size=11.3)
         else:
-            gal = cosmos_cat.makeGalaxy(index=index, gal_type='parametric')
+            gal = cosmos_cat.makeGalaxy(gal_type='parametric', rng=ud)
 
         # Apply a random rotation
         theta = ud()*2.0*numpy.pi*galsim.radians
@@ -307,7 +312,7 @@ def main(argv):
         # GSObject method.
         gal = gal.lens(g1, g2, mu)
 
-        # Convolve with the PSF.  
+        # Convolve with the PSF.
         final = galsim.Convolve(psf, gal)
 
         # Account for the fractional part of the position
@@ -365,7 +370,7 @@ def main(argv):
         time2 = time.time()
         tot_time = time2-time1
         logger.info('Galaxy %d: position relative to center = %s, t=%f s',
-                    k, str(world_pos), tot_time)
+                    k, str(uv_pos), tot_time)
 
     # We already have some noise in the image, but it isn't uniform.  So the first thing to do is
     # to make the Gaussian noise uniform across the whole image.  We have a special noise class
@@ -392,14 +397,14 @@ def main(argv):
     # Now write the image to disk.  It is automatically compressed with Rice compression,
     # since the filename we provide ends in .fz.
     full_image.write(file_name)
-    logger.info('Wrote image to %r',file_name) 
+    logger.info('Wrote image to %r',file_name)
 
     # Compute some sky positions of some of the pixels to compare with the values of RA, Dec
     # that ds9 reports.  ds9 always uses (1,1) for the lower left pixel, so the pixel coordinates
     # of these pixels are different by 1, but you can check that the RA and Dec values are
     # the same as what GalSim calculates.
-    ra_str = sky_center.ra.hms()
-    dec_str = sky_center.dec.dms()
+    ra_str = center_ra.hms()
+    dec_str = center_dec.dms()
     logger.info('Center of image    is at RA %sh %sm %ss, DEC %sd %sm %ss',
                 ra_str[0:3], ra_str[3:5], ra_str[5:], dec_str[0:3], dec_str[3:5], dec_str[5:])
     for (x,y) in [ (0,0), (0,image_size-1), (image_size-1,0), (image_size-1,image_size-1) ]:
@@ -408,7 +413,7 @@ def main(argv):
         dec_str = world_pos.dec.dms()
         logger.info('Pixel (%4d, %4d) is at RA %sh %sm %ss, DEC %sd %sm %ss',x,y,
                     ra_str[0:3], ra_str[3:5], ra_str[5:], dec_str[0:3], dec_str[3:5], dec_str[5:])
-    logger.info('ds9 reports these pixels as (1,1), (1,3600), etc. with the same RA, Dec.')
+    logger.info('ds9 reports these pixels as (1,1), (1,2048), etc. with the same RA, Dec.')
 
 
 if __name__ == "__main__":

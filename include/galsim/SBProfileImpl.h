@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -21,9 +21,7 @@
 #define GalSim_SBProfileImpl_H
 
 #include "SBProfile.h"
-#include "FFT.h"
 #include "integ/Int.h"
-#include "TMV.h"
 
 namespace galsim {
 
@@ -31,87 +29,105 @@ namespace galsim {
     {
     public:
 
-        // Constructor 
-        SBProfileImpl(const GSParamsPtr& _gsparams);
+        // Constructor
+        SBProfileImpl(const GSParams& _gsparams);
 
         // Virtual destructor
         virtual ~SBProfileImpl() {}
 
         // Pure virtual functions:
         virtual double xValue(const Position<double>& p) const =0;
-        virtual std::complex<double> kValue(const Position<double>& k) const =0; 
+        virtual std::complex<double> kValue(const Position<double>& k) const =0;
 
         // Calculate xValues and kValues for a bunch of positions at once.
         // For some profiles, this may be more efficient than repeated calls of xValue(pos)
         // since it affords the opportunity for vectorization of the calculations.
         //
         // For the first two versions, the x,y values for val(ix,iy) are
-        //     x = x0 + ix dx 
+        //     x = x0 + ix dx
         //     y = y0 + iy dy
         // The izero, jzero values are the indices where x=0, y=0.
         // For some profiles (e.g. axi-symmetric profiles), this affords further opportunities
-        // for optimization.  If there is no such index, then izero, jzero = 0, which indicates 
+        // for optimization.  If there is no such index, then izero, jzero = 0, which indicates
         // that all the values need to be used.
         //
         // For the latter two versions, the x,y values for val(ix,iy) are
         //     x = x0 + ix dx + iy dxy
         //     y = y0 + iy dy + ix dyx
         //
-        // If these aren't overridden, then the regular xValue or kValue will be called for each 
+        // If these aren't overridden, then the regular xValue or kValue will be called for each
         // position.
-        virtual void fillXValue(tmv::MatrixView<double> val,
-                                double x0, double dx, int izero,
-                                double y0, double dy, int jzero) const;
-        virtual void fillXValue(tmv::MatrixView<double> val,
-                                double x0, double dx, double dxy,
-                                double y0, double dy, double dyx) const;
-        virtual void fillKValue(tmv::MatrixView<std::complex<double> > val,
-                                double kx0, double dkx, int izero,
-                                double ky0, double dky, int jzero) const;
-        virtual void fillKValue(tmv::MatrixView<std::complex<double> > val,
-                                double kx0, double dkx, double dkxy,
-                                double ky0, double dky, double dkyx) const;
+        template <typename T>
+        void fillXImage(ImageView<T> im,
+                        double x0, double dx, int izero,
+                        double y0, double dy, int jzero) const
+        // This is a C++ workaround for the fact that templates can't be virtual.
+        { doFillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        template <typename T>
+        void fillXImage(ImageView<T> im,
+                        double x0, double dx, double dxy,
+                        double y0, double dy, double dyx) const
+        { doFillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
+                        double kx0, double dkx, int izero,
+                        double ky0, double dky, int jzero) const
+        { doFillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
+                        double kx0, double dkx, double dkxy,
+                        double ky0, double dky, double dkyx) const
+        { doFillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
 
-        virtual double maxK() const =0; 
+        template <typename T>
+        void defaultFillXImage(ImageView<T> im,
+                               double x0, double dx, int izero,
+                               double y0, double dy, int jzero) const;
+        template <typename T>
+        void defaultFillXImage(ImageView<T> im,
+                               double x0, double dx, double dxy,
+                               double y0, double dy, double dyx) const;
+        template <typename T>
+        void defaultFillKImage(ImageView<std::complex<T> > im,
+                               double kx0, double dkx, int izero,
+                               double ky0, double dky, int jzero) const;
+        template <typename T>
+        void defaultFillKImage(ImageView<std::complex<T> > im,
+                               double kx0, double dkx, double dkxy,
+                               double ky0, double dky, double dkyx) const;
+
+        virtual double maxK() const =0;
         virtual double stepK() const =0;
         virtual bool isAxisymmetric() const =0;
         virtual bool hasHardEdges() const =0;
-        virtual bool isAnalyticX() const =0; 
-        virtual bool isAnalyticK() const =0; 
+        virtual bool isAnalyticX() const =0;
+        virtual bool isAnalyticK() const =0;
         virtual Position<double> centroid() const = 0;
-        virtual double getFlux() const =0; 
-        virtual boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const=0;
+        virtual double getFlux() const =0;
+        virtual double maxSB() const =0;
+        virtual void shoot(PhotonArray& photons, UniformDeviate ud) const=0;
 
         // Functions with default implementations:
-        virtual void getXRange(double& xmin, double& xmax, std::vector<double>& /*splits*/) const 
+        virtual void getXRange(double& xmin, double& xmax, std::vector<double>& /*splits*/) const
         { xmin = -integ::MOCK_INF; xmax = integ::MOCK_INF; }
 
-        virtual void getYRange(double& ymin, double& ymax, std::vector<double>& /*splits*/) const 
+        virtual void getYRange(double& ymin, double& ymax, std::vector<double>& /*splits*/) const
         { ymin = -integ::MOCK_INF; ymax = integ::MOCK_INF; }
 
         virtual void getYRangeX(
-            double /*x*/, double& ymin, double& ymax, std::vector<double>& splits) const 
+            double /*x*/, double& ymin, double& ymax, std::vector<double>& splits) const
         { getYRange(ymin,ymax,splits); }
 
         virtual double getPositiveFlux() const { return getFlux()>0. ? getFlux() : 0.; }
 
         virtual double getNegativeFlux() const { return getFlux()>0. ? 0. : -getFlux(); }
 
-        // Utility for drawing into Image data structures.
-        // returns flux integral
-        template <typename T>
-        double fillXImage(ImageView<T>& image, double gain) const;
-
-        // Utility for drawing a k grid into FFT data structures 
-        void fillKGrid(KTable& kt) const;
-
-        // Utility for drawing an x grid into FFT data structures 
-        void fillXGrid(XTable& xt) const;
-
         // Public so it can be directly used from SBProfile.
-        const GSParamsPtr gsparams;
+        GSParams gsparams;
 
-        virtual std::string repr() const = 0;
+        virtual std::string serialize() const = 0;
+
+        virtual std::string repr() const {return serialize(); }
 
     protected:
 
@@ -120,12 +136,49 @@ namespace galsim {
         // Only one quadrant has its values computed.  Then these values are copied to the other
         // 3 quadrants.  The input values izero, jzero are the index of x=0, y=0.
         // At least one of these needs to be != 0.
-        void fillXValueQuadrant(tmv::MatrixView<double> val,
-                                double x0, double dx, int nx1,
-                                double y0, double dy, int ny1) const;
-        void fillKValueQuadrant(tmv::MatrixView<std::complex<double> > val,
-                                double kx0, double dkx, int nkx1,
-                                double ky0, double dky, int nky1) const;
+        template <typename T>
+        void fillXImageQuadrant(ImageView<T> im,
+                                double x0, double dx, int m1,
+                                double y0, double dy, int n1) const;
+        template <typename T>
+        void fillKImageQuadrant(ImageView<std::complex<T> > im,
+                                double kx0, double dkx, int m1,
+                                double ky0, double dky, int n1) const;
+
+        // These need to be overridden by any class that wants to use its own implementation
+        // of fillXImage or fillKImage.
+        virtual void doFillXImage(ImageView<double> im,
+                                  double x0, double dx, int izero,
+                                  double y0, double dy, int jzero) const
+        { defaultFillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        virtual void doFillXImage(ImageView<double> im,
+                                  double x0, double dx, double dxy,
+                                  double y0, double dy, double dyx) const
+        { defaultFillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        virtual void doFillXImage(ImageView<float> im,
+                                  double x0, double dx, int izero,
+                                  double y0, double dy, int jzero) const
+        { defaultFillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        virtual void doFillXImage(ImageView<float> im,
+                                  double x0, double dx, double dxy,
+                                  double y0, double dy, double dyx) const
+        { defaultFillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        virtual void doFillKImage(ImageView<std::complex<double> > im,
+                                  double kx0, double dkx, int izero,
+                                  double ky0, double dky, int jzero) const
+        { defaultFillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        virtual void doFillKImage(ImageView<std::complex<double> > im,
+                                  double kx0, double dkx, double dkxy,
+                                  double ky0, double dky, double dkyx) const
+        { defaultFillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
+        virtual void doFillKImage(ImageView<std::complex<float> > im,
+                                  double kx0, double dkx, int izero,
+                                  double ky0, double dky, int jzero) const
+        { defaultFillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        virtual void doFillKImage(ImageView<std::complex<float> > im,
+                                  double kx0, double dkx, double dkxy,
+                                  double ky0, double dky, double dkyx) const
+        { defaultFillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
 
     private:
         // Copy constructor and op= are undefined.
@@ -133,7 +186,17 @@ namespace galsim {
         void operator=(const SBProfileImpl& rhs);
     };
 
+    // Some helper functions that some Profiles use to speed up the calculations.
+
+    // Get the range i1 <= i < i2 where (kx0 + i dkx)^2 + ky^2 <= ksqmax
+    // Note: this calculates kysq along the way, so it is a reference.
+    void GetKValueRange1d(int& i1, int& i2, int m, double kmax, double ksqmax,
+                          double kx0, double dkx, double ky, double& kysq);
+
+    // Get the range i1 <= i < i2 where (kx0 + i dkx)^2 + (ky0 + i dky)^2 <= ksqmax
+    void GetKValueRange2d(int& i1, int& i2, int m, double kmax, double ksqmax,
+                          double kx0, double dkx, double ky0, double dky);
+
 }
 
 #endif
-

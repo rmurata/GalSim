@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -37,7 +37,7 @@ namespace galsim {
      * Functions derived from this interface can be integrated by `Int.h` and
      * can be sampled by `OneDimensionalDeviate`.
      */
-    class FluxDensity: public std::unary_function<double,double> 
+    class FluxDensity: public std::unary_function<double,double>
     {
     public:
         /// @brief virtual destructor for base class
@@ -55,7 +55,7 @@ namespace galsim {
      *
      * An `Interval` is a contiguous domain over which a `FluxDensity` function is well-behaved,
      * having no sign changes or extrema, which will make it easier to sample the FluxDensity
-     * function over its domain using either rejection sampling or by weighting uniformly 
+     * function over its domain using either rejection sampling or by weighting uniformly
      * distributed photons.
      *
      * This class could be made a subclass of `OneDimensionalDeviate` as it should only be used by
@@ -82,13 +82,13 @@ namespace galsim {
      *
      * See the `OneDimensionalDeviate` docstrings for more information.
      */
-    class Interval 
+    class Interval
     {
     public:
         /**
          * @brief Constructor
          *
-         * Note that no copy of the function is saved.  The function whose reference is passed must 
+         * Note that no copy of the function is saved.  The function whose reference is passed must
          * remain in existence through useful lifetime of the `Interval`
          * @param[in] fluxDensity  The function giving flux (= unnormalized probability) density.
          * @param[in] xLower       Lower bound in x (or radius) of this interval.
@@ -102,7 +102,7 @@ namespace galsim {
                  double xLower,
                  double xUpper,
                  bool isRadial,
-                 const GSParamsPtr& gsparams) :
+                 const GSParams& gsparams) :
             _fluxDensityPtr(&fluxDensity),
             _xLower(xLower),
             _xUpper(xUpper),
@@ -110,11 +110,36 @@ namespace galsim {
             _gsparams(gsparams),
             _fluxIsReady(false) {}
 
+        Interval(const Interval& rhs) :
+            _fluxDensityPtr(rhs._fluxDensityPtr),
+            _xLower(rhs._xLower),
+            _xUpper(rhs._xUpper),
+            _isRadial(rhs._isRadial),
+            _gsparams(rhs._gsparams),
+            _fluxIsReady(false),
+            _useRejectionMethod(rhs._useRejectionMethod),
+            _invMaxAbsDensity(rhs._invMaxAbsDensity),
+            _invMeanAbsDensity(rhs._invMeanAbsDensity)
+            {}
+
+        Interval& operator=(const Interval& rhs)
+        {
+            // Everything else is constant, so no need to copy.
+            _xLower = rhs._xLower;
+            _xUpper = rhs._xUpper;
+            _isRadial = rhs._isRadial;
+            _fluxIsReady = false;
+            _useRejectionMethod = rhs._useRejectionMethod;
+            _invMaxAbsDensity = rhs._invMaxAbsDensity;
+            _invMeanAbsDensity = rhs._invMeanAbsDensity;
+            return *this;
+        }
+
         /**
          * @brief Draw one photon position and flux from within this interval
          * @param[in] unitRandom An initial uniform deviate to select photon
          * @param[out] x (or radial) coordinate of the selected photon.
-         * @param[out] flux flux of the selected photon, nominally +-1, but can differ if not 
+         * @param[out] flux flux of the selected photon, nominally +-1, but can differ if not
          *             using rejection.
          * @param[out] ud UniformDeviate used for rejection sampling, if needed.
          */
@@ -135,7 +160,7 @@ namespace galsim {
          * @param[out] xLower Interval lower bound
          * @param[out] xUpper Interval upper bound
          */
-        void getRange(double& xLower, double& xUpper) const 
+        void getRange(double& xLower, double& xUpper) const
         {
             xLower = _xLower;
             xUpper = _xUpper;
@@ -144,8 +169,8 @@ namespace galsim {
         /**
          * @brief Return a list of intervals that divide this one into acceptably small ones.
          *
-         * This routine works by recursive bisection.  Intervals that are returned have all had 
-         * their fluxes integrated.  Intervals are split until the FluxDensity does not vary too 
+         * This routine works by recursive bisection.  Intervals that are returned have all had
+         * their fluxes integrated.  Intervals are split until the FluxDensity does not vary too
          * much within an interval, or when their flux is below `smallFlux`.
          * @param[in] smallFlux Flux below which a sub-interval is not further split.
          * @returns List contiguous Intervals whose union is this one.
@@ -158,22 +183,22 @@ namespace galsim {
         double _xLower; // Interval lower bound
         double _xUpper; // Interval upper bound
         bool _isRadial; // True if domain is an annulus, otherwise domain is a linear interval.
-        GSParamsPtr _gsparams;
+        const GSParams& _gsparams;
 
         mutable bool _fluxIsReady; // True if flux has been integrated
         void checkFlux() const; // Calculate flux if it has not already been done.
         mutable double _flux; // Integrated flux in this interval (can be negative)
 
-        // Finds the x or radius coord that would enclose fraction of this interval's flux 
+        // Finds the x or radius coord that would enclose fraction of this interval's flux
         // if flux were constant.
-        double interpolateFlux(double fraction) const; 
+        double interpolateFlux(double fraction) const;
 
-        // Set this variable true if returning equal fluxes with rejection method, vs returning 
+        // Set this variable true if returning equal fluxes with rejection method, vs returning
         // non-unity flux weight.
         bool _useRejectionMethod;
 
         // 1. / (Maximum absolute flux density in the interval (assumed to be at an endpoint))
-        double _invMaxAbsDensity; 
+        double _invMaxAbsDensity;
 
         double _invMeanAbsDensity; // 1. / (Mean absolute flux density in the interval)
 
@@ -208,26 +233,26 @@ namespace galsim {
      * - There is at most one extremum within the interval
      * - Any extremum can be localized by sampling the interval at `RANGE_DIVISION_FOR_EXTREMA`
          equidistant points.
-     * - The function is smooth enough to be integrated over the interval with standard basic 
+     * - The function is smooth enough to be integrated over the interval with standard basic
      *   methods.
      */
-    class OneDimensionalDeviate 
+    class OneDimensionalDeviate
     {
     public:
         /**
          * @brief constructor
-         * @param[in] fluxDensity  The FluxDensity being sampled.  No copy is made, original must 
+         * @param[in] fluxDensity  The FluxDensity being sampled.  No copy is made, original must
          *                         stay in existence.
-         * @param[in] range        Ordered argument vector specifying the domain for sampling as 
+         * @param[in] range        Ordered argument vector specifying the domain for sampling as
          *                         described in class docstring.
-         * @param[in] isRadial     Set true for an axisymmetric function on the plane; false 
+         * @param[in] isRadial     Set true for an axisymmetric function on the plane; false
          *                         for linear domain.
          * @param[in] gsparams     GSParams object storing constants that control the accuracy of
          *                         operations, if different from the default.
          */
         OneDimensionalDeviate(
             const FluxDensity& fluxDensity, std::vector<double>& range, bool isRadial,
-            const GSParamsPtr& gsparams);
+            const GSParams& gsparams);
 
         /// @brief Return total flux in positive regions of FluxDensity
         double getPositiveFlux() const {return _positiveFlux;}
@@ -240,10 +265,11 @@ namespace galsim {
          *
          * If `_isRadial=true`, photons will populate the plane.  Otherwise only the x coordinate
          * of photons will be generated, for 1d distribution.
-         * @param[in] N number of photons to draw
-         * @param[in] ud UniformDeviate used to produce random selections.
+         * @param[in] photons PhotonArray in which to write the photon information
+         * @param[in] ud UniformDeviate that will be used to draw photons from distribution.
+         * @param[in] xandy Whether to populate both x and y values (true) or just x (false)
          */
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const;
+        void shoot(PhotonArray& photons, UniformDeviate ud, bool xandy=false) const;
 
     private:
 
@@ -252,7 +278,7 @@ namespace galsim {
         double _positiveFlux; // Stored total positive flux
         double _negativeFlux; // Stored total negative flux
         const bool _isRadial; // True for 2d axisymmetric function, false for 1d function
-        const GSParamsPtr _gsparams;
+        GSParams _gsparams;
     };
 
 } // namespace galsim

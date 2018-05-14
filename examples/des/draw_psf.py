@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -39,6 +39,8 @@ would probably want to draw these with no noise on individual postage stamps or 
 that.
 """
 
+from __future__ import print_function
+
 import galsim
 import os
 import sys
@@ -47,9 +49,19 @@ import galsim.des
 
 def main(argv):
 
-    root = 'DECam_00154912' 
+    root = 'DECam_00154912'
 
     data_dir = 'des_data'
+
+    if not os.path.exists(data_dir):
+        print('You will need to download some DES data to use this script.')
+        print('Run the following commands from the directory GalSim/examples/des:')
+        print()
+        print('    wget http://www.sas.upenn.edu/~mjarvis/des_data.tar.gz')
+        print('    tar xfz des_data.tar.gz')
+        print()
+        print('Then try running this script again.  It should work now.')
+        sys.exit()
 
     # Set which chips to run on
     first_chip = 1
@@ -57,10 +69,16 @@ def main(argv):
     #first_chip = 12
     #last_chip = 12
 
+    # quick and dirty command line parsing.
+    for var in argv:
+        if var.startswith('first='): first_chip = int(var[6:])
+        if var.startswith('last='): last_chip = int(var[5:])
+    print('Processing chips %d .. %d'%(first_chip, last_chip))
+
     out_dir = 'output'
 
     # The random seed, so the results are deterministic
-    random_seed = 1339201           
+    random_seed = 1339201
 
     x_col = 'X_IMAGE'
     y_col = 'Y_IMAGE'
@@ -77,7 +95,7 @@ def main(argv):
         os.mkdir(out_dir)
 
     for chipnum in range(first_chip,last_chip+1):
-        print 'Start chip ',chipnum
+        print('Start chip ',chipnum)
 
         # Setup the file names
         image_file = '%s_%02d.fits.fz'%(root,chipnum)
@@ -86,7 +104,7 @@ def main(argv):
         fitpsf_file = '%s_%02d_fitpsf.fits'%(root,chipnum)
         psfex_image_file = '%s_%02d_psfex_image.fits'%(root,chipnum)
         fitpsf_image_file = '%s_%02d_fitpsf_image.fits'%(root,chipnum)
-    
+
         # Get some parameters about the image from the data image header information
         image_header = galsim.FitsHeader(image_file, dir=data_dir)
         xsize = image_header[xsize_key]
@@ -108,15 +126,11 @@ def main(argv):
         fitpsf = galsim.des.DES_Shapelet(fitpsf_file, dir=data_dir)
 
         nobj = cat.nobjects
-        print 'Catalog has ',nobj,' objects'
+        print('Catalog has ',nobj,' objects')
 
         for k in range(nobj):
             sys.stdout.write('.')
             sys.stdout.flush()
-            # The usual random number generator using a different seed for each galaxy.
-            # I'm not actually using the rng for object creation (everything comes from the
-            # input files), but the rng that matches the config version is here just in case.
-            rng = galsim.BaseDeviate(random_seed+k)
 
             # Skip objects with a non-zero flag
             flag = cat.getInt(k,flag_col)
@@ -124,7 +138,7 @@ def main(argv):
 
             # Get the position from the galaxy catalog
             x = cat.getFloat(k,x_col)
-            y = cat.getFloat(k,y_col) 
+            y = cat.getFloat(k,y_col)
             image_pos = galsim.PositionD(x,y)
             #print '    pos = ',image_pos
             x += 0.5   # + 0.5 to account for even-size postage stamps
@@ -180,29 +194,29 @@ def main(argv):
             else:
                 pass
                 #print '...not in fitpsf.bounds'
-        print
+        print()
 
         # Add background level
         psfex_image += sky_level
         fitpsf_image += sky_level
 
         # Add noise
-        rng = galsim.BaseDeviate(random_seed+nobj)
+        rng = galsim.BaseDeviate(random_seed)
         noise = galsim.CCDNoise(rng, gain=gain)
         psfex_image.addNoise(noise)
         # Reset the random seed to match the action of the yaml version
-        # Note: the different between seed and reset matters here.
-        # reset would sever the connection between this rng instance and the one stored in noise.  
+        # Note: the difference between seed and reset matters here.
+        # reset would sever the connection between this rng instance and the one stored in noise.
         # seed changes the seed while keeping the connection between them.
-        rng.seed(random_seed+nobj)
+        rng.seed(random_seed)
         fitpsf_image.addNoise(noise)
 
         # Now write the images to disk.
         psfex_image.write(psfex_image_file, dir=out_dir)
         fitpsf_image.write(fitpsf_image_file, dir=out_dir)
-        print 'Wrote images to %s and %s'%(
+        print('Wrote images to %s and %s'%(
                 os.path.join(out_dir,psfex_image_file),
-                os.path.join(out_dir,fitpsf_image_file))
+                os.path.join(out_dir,fitpsf_image_file)))
 
         # Increment the random seed by the number of objects in the file
         random_seed += nobj

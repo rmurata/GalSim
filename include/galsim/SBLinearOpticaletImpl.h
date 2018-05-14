@@ -22,6 +22,7 @@
 
 #include "SBProfileImpl.h"
 #include "SBLinearOpticalet.h"
+#include "Table.h"
 #include "LRUCache.h"
 
 namespace galsim {
@@ -70,11 +71,11 @@ namespace galsim {
         mutable double _xnorm;   ///< Real space normalization.
 
         // Parameters for the Hankel transform:
-        mutable Table<double,double> _ftsum; ///< Lookup table for Hankel transform
-        mutable Table<double,double> _ftdiff; ///< Lookup table for Hankel transform
+        mutable TableBuilder _ftsum; ///< Lookup table for Hankel transform
+        mutable TableBuilder _ftdiff; ///< Lookup table for Hankel transform
 
         // Helper functions used internally:
-        void buildFT() const;
+        void setupFT() const;
         double calculateFluxRadius(const double& flux_frac) const;
         double Vnm(int n, int m, double r) const;
     };
@@ -82,8 +83,7 @@ namespace galsim {
     class SBLinearOpticalet::SBLinearOpticaletImpl : public SBProfileImpl
     {
     public:
-        SBLinearOpticaletImpl(double r0, int n1, int m1, int n2, int m2,
-                              const GSParamsPtr& gsparams);
+        SBLinearOpticaletImpl(double r0, int n1, int m1, int n2, int m2, const GSParams& gsparams);
 
         ~SBLinearOpticaletImpl() {}
 
@@ -106,6 +106,7 @@ namespace galsim {
 
         double getFlux() const
         { return 1.0; }
+        double maxSB() const { return 1.e300; } // XXX
 
         /// @brief Returns the scale radius
         double getScaleRadius() const { return _r0; }
@@ -119,24 +120,28 @@ namespace galsim {
         int getM2() const {return _m2;}
 
         /// @brief Photon-shooting is not implemented for SBLinearOpticalet, will throw an exception.
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const
+        void shoot(PhotonArray& photons, UniformDeviate ud) const
         { throw SBError("SBLinearOpticalet::shoot() is not implemented"); }
 
         // Overrides for better efficiency
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, int izero,
                         double y0, double dy, int jzero) const;
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, double dxy,
                         double y0, double dy, double dyx) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
 
-        std::string repr() const;
+        std::string serialize() const;
 
     private:
         double _r0;             ///< Scale radius specified at the constructor.
@@ -148,13 +153,13 @@ namespace galsim {
         double _inv_r0;
         double _inv_r0_sq;
 
-        boost::shared_ptr<LinearOpticaletInfo> _info; ///< Points to info structure
+        shared_ptr<LinearOpticaletInfo> _info; ///< Points to info structure
 
         // Copy constructor and op= are undefined.
         SBLinearOpticaletImpl(const SBLinearOpticaletImpl& rhs);
         void operator=(const SBLinearOpticaletImpl& rhs);
 
-        static LRUCache<boost::tuple< int, int, int, int, GSParamsPtr >, LinearOpticaletInfo> cache;
+        static LRUCache<Tuple< int, int, int, int, GSParamsPtr >, LinearOpticaletInfo> cache;
     };
 }
 

@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -23,6 +23,8 @@
 #include "SBProfileImpl.h"
 #include "SBKolmogorov.h"
 #include "LRUCache.h"
+#include "OneDimensionalDeviate.h"
+#include "Table.h"
 
 namespace galsim {
 
@@ -30,10 +32,10 @@ namespace galsim {
      * @brief A class that caches the photon shooting objects and real-space
      *        lookup table, so they don't have to be set up again each time.
      */
-    class KolmogorovInfo 
+    class KolmogorovInfo
     {
     public:
-        /** 
+        /**
          * @brief Constructor
          */
         KolmogorovInfo(const GSParamsPtr& gsparams);
@@ -41,7 +43,7 @@ namespace galsim {
         /// @brief Destructor: deletes photon-shooting classes if necessary
         ~KolmogorovInfo() {}
 
-        /** 
+        /**
          * @brief Returns the real space value of the Kolmogorov function,
          * normalized to unit flux (see private attributes).
          * @param[in] r should be given in units of lam_over_r0  (i.e. r_true*r0)
@@ -53,7 +55,7 @@ namespace galsim {
 
         /**
          * @brief Returns the k-space value of the Kolmogorov function.
-         * @param[in] ksq_over_pisq should be given in units of lam_over_r0  
+         * @param[in] ksq_over_pisq should be given in units of lam_over_r0
          * (i.e. k_true^2 / (pi^2 * r0^2))
          *
          * This is used to calculate the real kValue, but it comes back unnormalized.
@@ -70,36 +72,35 @@ namespace galsim {
          * Kolmogorov profiles are sampled with a numerical method, using class
          * `OneDimensionalDeviate`.
          *
-         * @param[in] N Total number of photons to produce.
+         * @param[in] photons PhotonArray in which to write the photon information
          * @param[in] ud UniformDeviate that will be used to draw photons from distribution.
-         * @returns PhotonArray containing all the photons' info.
          */
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const;
+        void shoot(PhotonArray& photons, UniformDeviate ud) const;
 
     private:
         KolmogorovInfo(const KolmogorovInfo& rhs); ///< Hides the copy constructor.
         void operator=(const KolmogorovInfo& rhs); ///<Hide assignment operator.
 
-        double _stepk; ///< Sampling in k space necessary to avoid folding 
+        double _stepk; ///< Sampling in k space necessary to avoid folding
         double _maxk; ///< Maximum k value to use
 
-        TableDD _radial;  ///< Lookup table for Fourier transform of MTF.
+        TableBuilder _radial;  ///< Lookup table for Fourier transform of MTF.
 
         ///< Class that can sample radial distribution
-        boost::shared_ptr<OneDimensionalDeviate> _sampler; 
+        shared_ptr<OneDimensionalDeviate> _sampler;
     };
 
-    class SBKolmogorov::SBKolmogorovImpl : public SBProfileImpl 
+    class SBKolmogorov::SBKolmogorovImpl : public SBProfileImpl
     {
     public:
-        SBKolmogorovImpl(double lam_over_r0, double flux, const GSParamsPtr& gsparams);
+        SBKolmogorovImpl(double lam_over_r0, double flux, const GSParams& gsparams);
 
         ~SBKolmogorovImpl() {}
 
         double xValue(const Position<double>& p) const;
         std::complex<double> kValue(const Position<double>& k) const;
 
-        bool isAxisymmetric() const { return true; } 
+        bool isAxisymmetric() const { return true; }
         bool hasHardEdges() const { return false; }
         bool isAnalyticX() const { return true; }
         bool isAnalyticK() const { return true; }
@@ -107,39 +108,43 @@ namespace galsim {
         double maxK() const;
         double stepK() const;
 
-        Position<double> centroid() const 
+        Position<double> centroid() const
         { return Position<double>(0., 0.); }
 
         double getFlux() const { return _flux; }
         double getLamOverR0() const { return _lam_over_r0; }
+        double maxSB() const;
 
         /**
          * @brief Kolmogorov photon-shooting is done numerically with `OneDimensionalDeviate` class.
          *
-         * @param[in] N Total number of photons to produce.
+         * @param[in] photons PhotonArray in which to write the photon information
          * @param[in] ud UniformDeviate that will be used to draw photons from distribution.
-         * @returns PhotonArray containing all the photons' info.
          */
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const;
+        void shoot(PhotonArray& photons, UniformDeviate ud) const;
 
         // Overrides for better efficiency
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, int izero,
                         double y0, double dy, int jzero) const;
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, double dxy,
                         double y0, double dy, double dyx) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
 
-        std::string repr() const;
+        std::string serialize() const;
 
     private:
-        
+
         double _lam_over_r0; ///< lambda / r0
         double _k0; ///< Derived value so MTF is exp(-(k/k0)^5/3)
         double _k0sq;
@@ -149,16 +154,48 @@ namespace galsim {
         double _flux; ///< Flux.
         double _xnorm; ///< Calculated value for normalizing xValues returned from Info class.
 
-        const boost::shared_ptr<KolmogorovInfo> _info;
+        const shared_ptr<KolmogorovInfo> _info;
+
+        void doFillXImage(ImageView<double> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillXImage(ImageView<double> im,
+                          double x0, double dx, double dxy,
+                          double y0, double dy, double dyx) const
+        { fillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        void doFillXImage(ImageView<float> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillXImage(ImageView<float> im,
+                          double x0, double dx, double dxy,
+                          double y0, double dy, double dyx) const
+        { fillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
 
         // Copy constructor and op= are undefined.
         SBKolmogorovImpl(const SBKolmogorovImpl& rhs);
         void operator=(const SBKolmogorovImpl& rhs);
 
-        static LRUCache< GSParamsPtr, KolmogorovInfo > cache;
+        static LRUCache<GSParamsPtr, KolmogorovInfo> cache;
     };
 
 }
 
 #endif
-

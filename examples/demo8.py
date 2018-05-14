@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -24,24 +24,21 @@ The eighth script in our tutorial about using GalSim in python scripts: examples
 In this script, we show how to run the GalSim config processing using a python dict rather
 than using a config file.  The parallel tutorial examples/demo*.yaml have shown how to
 do the same thing as these demo*.py files using a config file.  Now we turn the tables
-and show how to use some of the machinery in the GalSim configuration processing 
-from within python itself.  To appreciate this example script, you'll probably want to 
+and show how to use some of the machinery in the GalSim configuration processing
+from within python itself.  To appreciate this example script, you'll probably want to
 have looked through that series as well up to demo8.yaml and reference that file
 as you look through this one.
 
 This could be useful if you want to use the config machinery to build the images, but then
-rather than write the images to disk, you want to keep them in memory and do further 
+rather than write the images to disk, you want to keep them in memory and do further
 processing with them.  (e.g. Run your shape measurement code on the images from within python.)
 
 New features introduced in this demo:
 
-- galsim.config.Process(config)
-- galsim.config.ProcessInput(config)
-- galsim.config.ProcessOutput(config)
-- galsim.config.BuildFits(file_name, config)
-- galsim.config.BuildMultiFits(file_name, nimages, config)
-- galsim.config.BuildDataCube(file_name, nimages, config)
-- galsim.config.BuildImage(config)
+- galsim.config.Process(config, logger)
+- galsim.config.ProcessInput(config, logger)
+- galsim.config.BuildFile(config, file_num, logger)
+- image = galsim.config.BuildImage(config, image_num, logger)
 - galsim.fits.read(file_name)
 """
 
@@ -69,7 +66,7 @@ def main(argv):
     config = {}
 
     # We'll only be using three top-level fields in this file: psf, gal, and image.
-    # We don't have any input files, so we don't need input.   And we're only going to 
+    # We don't have any input files, so we don't need input.   And we're only going to
     # have the config machinery build the images, so we don't need output.
 
     # We can define each attribute individually:
@@ -78,7 +75,7 @@ def main(argv):
     config['psf']['beta'] = 2.4
     config['psf']['fwhm'] = 0.65
 
-    # However, defining each field using the normal python way of specifying a dict is 
+    # However, defining each field using the normal python way of specifying a dict is
     # probably more often going to be the preferred way to do this:
     # (This looks a lot like a JSON file -- see the examples in examples/json/demo*.json.)
     config['gal'] = {
@@ -86,23 +83,23 @@ def main(argv):
         "items" : [
             {
                 "type" : "Sersic",
-                "n" : 3.6,
-                "half_light_radius" : { "type" : "Random" , "min" : 0.3 , "max" : 0.9 },
-                "flux" : { "type" : "Random" , "min" : 0.1 , "max" : 0.5 },
-                "ellip" : {
-                    "type" : "EBeta",
-                    "e" : { "type" : "Random" , "min" : 0.0 , "max" : 0.3 },
-                    "beta" : { "type" : "Random" }
-                }
-            },
-            {
-                "type" : "Sersic",
                 "n" : 1.5,
+                "flux" : { "type" : "Random" , "min" : 0.5 , "max" : 0.9 },
                 "half_light_radius" : { "type" : "Random" , "min" : 0.5 , "max" : 1.5 },
                 "ellip" : {
                     "type" : "E1E2",
                     "e1" : { "type" : "RandomGaussian" , "sigma" : 0.4 },
                     "e2" : { "type" : "RandomGaussian" , "sigma" : 0.4 }
+                }
+            },
+            {
+                "type" : "Sersic",
+                "n" : 3.6,
+                "half_light_radius" : { "type" : "Random" , "min" : 0.3 , "max" : 0.9 },
+                "ellip" : {
+                    "type" : "Eta1Eta2",
+                    "eta1" : { "type" : "RandomGaussian" , "sigma" : 0.3 },
+                    "eta2" : { "type" : "RandomGaussian" , "sigma" : 0.3 }
                 }
             }
         ],
@@ -131,7 +128,7 @@ def main(argv):
     #     galsim.config.Process(config)
     #
     # Since we don't want to have the config machinery output this to a file, we don't want
-    # to do that here.  But if you also define the output field appropriately, that's the 
+    # to do that here.  But if you also define the output field appropriately, that's the
     # simplest way to process a config dict.
     #
     # That function runs through each output file specified, and for each one, it first
@@ -144,47 +141,32 @@ def main(argv):
     # save the catalog (or whatever) in the config dict in the way that further processing
     # functions expect.  However, we don't have any input field, so we don't need it here.
     #
-    # To build the files, the Process function then calls one of the following:
+    # The Process function then calls the following function to build each file:
     #
-    #     galsim.config.BuildFits(file_name, config)               -- build a regular fits file
-    #     galsim.config.BuildMultiFits(file_name, nimages, config) -- build a multi-extension fits 
-    #                                                                 file
-    #     galsim.config.BuildDataCube(file_name, nimages, config)  -- build a fits data cube
+    #     galsim.config.BuildFile(config, file_num)
     #
     # Again, we'll forego that option here, so we can see how to use the config machinery
     # to produce images that we can use from within python.
     #
-    # Each of these functions call the following function to process the image field
-    # and actually build the images:
+    # This function then calls the following function to process the image field and actually
+    # build each image:
     #
-    #     galsim.config.BuildImage(config)
+    #     image = galsim.config.BuildImage(config, image_num)
     #
-    # This returns a tuple of potentially 4 images:
-    #
-    #     (image, psf_image, weight_image, badpix_image)
-    #
-    # The default is for the latter 3 to all be None, but you can have the function build those
-    # images as well by setting the optional kwargs: make_psf_image=True, make_weight_image=True,
-    # and make_badpix_image=True, respectively.
-    #
-    # All of the above functions also have an optional kwarg, logger, which can take a 
+    # All of the above functions also have an optional kwarg, logger, which can take a
     # logger object to output diagnostic information if desired.  We'll use that option here
     # to output the progress of the build as we go.  Our logger is set with level=logging.INFO
-    # which means it will output a modest amount of text along the way.  Using level=logging.DEBUG 
+    # which means it will output a modest amount of text along the way.  Using level=logging.DEBUG
     # will output a lot of text, useful when diagnosing a mysterious crash.  And using
     # level=logging.WARNING or higher will be pretty silent unless there is a problem.
 
     t1 = time.time()
 
-    # Build the image
-    # Since BuildImage returns a tuple of 4 images (see above) even though the latter
-    # three are all returned as None, we still need to deal with the return values.
-    # You could take [0] of the return value to just take the first image.  
-    # You could also assign them all to an appropriate name and then not use them.
-    # Another cute way to do it is to use an underscore for names of returned values
-    # that you are planning to ignore:
-    image, _, _, _ = galsim.config.BuildImage(config, logger=logger)
-    
+    # Build the image.
+    # In this case, there is only a single image, so image_num=0.  This is the default, so we
+    # can actually omit this parameter for brevity.
+    image = galsim.config.BuildImage(config, logger=logger)
+
     # At this point you could do something interesting with the image in memory.
     # After all, that was kind of the point of using BuildImage rather than the other higher
     # level processing functions described above.  So perhaps you could insert your shape
@@ -204,7 +186,7 @@ def main(argv):
     # Now let's do it again using multiple processes.  This is really easy to do
     # using the config stuff.  It's just one extra parameter in the dict.
 
-    # The config processing functions save various things in the dict as they go, so 
+    # The config processing functions save various things in the dict as they go, so
     # for the second pass, start with a pristine version of the config dict.
     config = save_config
 
@@ -212,9 +194,15 @@ def main(argv):
     nproc = 4
     config['image']['nproc'] = nproc
 
-    # This time, let's just combine the two operations above and use the BuildFits function:
+    # This time, let's just combine the two operations above and use the BuildFile function.
+    # BuildFile uses config['output'] to determine the relevant information about how to
+    # build the files.  In this case, the only thing we need to specify is the file name.
     multi_file_name = os.path.join('output','bpd_multi.fits')
-    galsim.config.BuildFits(multi_file_name, config, logger=logger)
+    config['output'] = {
+        'file_name' : multi_file_name
+    }
+    # Again, we are just building one file, so use the default value of file_num=0.
+    galsim.config.BuildFile(config, logger=logger)
 
     t3 = time.time()
 
@@ -223,7 +211,7 @@ def main(argv):
     logger.info('Wrote images to %r and %r',single_file_name, multi_file_name)
 
     # Check that the builds are deterministic, even when using multiple processes.
-    image2 = galsim.fits.read(multi_file_name) 
+    image2 = galsim.fits.read(multi_file_name)
     numpy.testing.assert_array_equal(image.array, image2.array,
                                      err_msg="Images are not equal")
     logger.info('Images created using single and multiple processes are exactly equal.')

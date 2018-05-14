@@ -59,8 +59,7 @@ namespace galsim {
          * @param[in] gsparams GSParams object storing constants that control the accuracy of image
          *                     operations and rendering, if different from the default.
          */
-        SBLinearOpticalet(double r0, int n1, int m1, int n2, int m2,
-                    const GSParamsPtr& gsparams);
+        SBLinearOpticalet(double r0, int n1, int m1, int n2, int m2, const GSParams& gsparams);
 
         /// @brief Copy constructor.
         SBLinearOpticalet(const SBLinearOpticalet& rhs);

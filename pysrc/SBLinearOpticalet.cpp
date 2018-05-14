@@ -16,57 +16,16 @@
  *    this list of conditions, and the disclaimer given in the documentation
  *    and/or other materials provided with the distribution.
  */
-#ifndef __INTEL_COMPILER
-#if defined(__GNUC__) && __GNUC__ >= 4 && (__GNUC__ >= 5 || __GNUC_MINOR__ >= 8)
-#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
-#endif
-#endif
-
-#define BOOST_NO_CXX11_SMART_PTR
-#include "boost/python.hpp"
-#include "boost/python/stl_iterator.hpp"
-
+#include "PyBind11Helper.h"
 #include "SBLinearOpticalet.h"
-
-namespace bp = boost::python;
 
 namespace galsim {
 
-    struct PySBLinearOpticalet
+    void pyExportSBLinearOpticalet(PY_MODULE& _galsim)
     {
-
-        static SBLinearOpticalet* construct(double r0, int n1, int m1, int n2, int m2,
-                                            boost::shared_ptr<GSParams> gsparams)
-        {
-            return new SBLinearOpticalet(r0, n1, m1, n2, m2, gsparams);
-        }
-
-        static void wrap()
-        {
-            bp::class_<SBLinearOpticalet,bp::bases<SBProfile> >("SBLinearOpticalet",bp::no_init)
-                .def("__init__",
-                     bp::make_constructor(
-                        &construct, bp::default_call_policies(),
-                        (bp::arg("scale_radius"),
-                         bp::arg("n1"),
-                         bp::arg("m1"),
-                         bp::arg("n2"),
-                         bp::arg("m2"),
-                         bp::arg("gsparams")=bp::object()))
-                )
-                .def(bp::init<const SBLinearOpticalet &>())
-                .def("getScaleRadius", &SBLinearOpticalet::getScaleRadius)
-                .def("getN1", &SBLinearOpticalet::getN1)
-                .def("getM1", &SBLinearOpticalet::getM1)
-                .def("getN1", &SBLinearOpticalet::getN2)
-                .def("getM1", &SBLinearOpticalet::getM2)
-                ;
-        }
-    };
-
-    void pyExportSBLinearOpticalet()
-    {
-        PySBLinearOpticalet::wrap();
+        py::class_<SBLinearOpticalet, BP_BASES(SBProfile)>(
+            GALSIM_COMMA "SBLinearOpticalet" BP_NOINIT)
+            .def(py::init<double,int,int,int,int, GSParams>());
     }
 
 } // namespace galsim

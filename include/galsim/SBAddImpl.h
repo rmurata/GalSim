@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -28,7 +28,7 @@ namespace galsim {
     class SBAdd::SBAddImpl : public SBProfileImpl
     {
     public:
-        SBAddImpl(const std::list<SBProfile>& slist, const GSParamsPtr& gsparams);
+        SBAddImpl(const std::list<SBProfile>& slist, const GSParams& gsparams);
         ~SBAddImpl() {}
 
         std::list<SBProfile> getObjs() const { return _plist; }
@@ -41,9 +41,9 @@ namespace galsim {
         double maxK() const { return _maxMaxK; }
         double stepK() const { return _minStepK; }
 
-        void getXRange(double& xmin, double& xmax, std::vector<double>& splits) const 
-        { 
-            xmin = integ::MOCK_INF; xmax = -integ::MOCK_INF; 
+        void getXRange(double& xmin, double& xmax, std::vector<double>& splits) const
+        {
+            xmin = integ::MOCK_INF; xmax = -integ::MOCK_INF;
             for (ConstIter pptr = _plist.begin(); pptr!=_plist.end(); ++pptr) {
                 double xmin_1, xmax_1;
                 pptr->getXRange(xmin_1,xmax_1,splits);
@@ -52,9 +52,9 @@ namespace galsim {
             }
         }
 
-        void getYRange(double& ymin, double& ymax, std::vector<double>& splits) const 
+        void getYRange(double& ymin, double& ymax, std::vector<double>& splits) const
         {
-            ymin = integ::MOCK_INF; ymax = -integ::MOCK_INF; 
+            ymin = integ::MOCK_INF; ymax = -integ::MOCK_INF;
             for (ConstIter pptr = _plist.begin(); pptr!=_plist.end(); ++pptr) {
                 double ymin_1, ymax_1;
                 pptr->getYRange(ymin_1,ymax_1,splits);
@@ -63,9 +63,9 @@ namespace galsim {
             }
         }
 
-        void getYRangeX(double x, double& ymin, double& ymax, std::vector<double>& splits) const 
+        void getYRangeX(double x, double& ymin, double& ymax, std::vector<double>& splits) const
         {
-            ymin = integ::MOCK_INF; ymax = -integ::MOCK_INF; 
+            ymin = integ::MOCK_INF; ymax = -integ::MOCK_INF;
             for (ConstIter pptr = _plist.begin(); pptr!=_plist.end(); ++pptr) {
                 double ymin_1, ymax_1;
                 pptr->getYRangeX(x,ymin_1,ymax_1,splits);
@@ -79,10 +79,11 @@ namespace galsim {
         bool isAnalyticX() const { return _allAnalyticX; }
         bool isAnalyticK() const { return _allAnalyticK; }
 
-        Position<double> centroid() const 
+        Position<double> centroid() const
         { return Position<double>(_sumfx / _sumflux, _sumfy / _sumflux); }
 
         double getFlux() const { return _sumflux; }
+        double maxSB() const;
 
         /**
          * @brief Shoot photons through this SBAdd.
@@ -90,11 +91,10 @@ namespace galsim {
          * SBAdd will divide the N photons among its summands with probabilities proportional to
          * their integrated (absolute) fluxes.  Note that the order of photons in output array will
          * not be random as different summands' outputs are simply concatenated.
-         * @param[in] N Total number of photons to produce.
+         * @param[in] photons PhotonArray in which to write the photon information
          * @param[in] ud UniformDeviate that will be used to draw photons from distribution.
-         * @returns PhotonArray containing all the photons' info.
          */
-        boost::shared_ptr<PhotonArray> shoot(int N, UniformDeviate ud) const;
+        void shoot(PhotonArray& photons, UniformDeviate ud) const;
 
         /**
          * @brief Give total positive flux of all summands
@@ -118,28 +118,32 @@ namespace galsim {
         double getNegativeFlux() const;
 
         // Overrides for better efficiency
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, int izero,
                         double y0, double dy, int jzero) const;
-        void fillXValue(tmv::MatrixView<double> val,
+        template <typename T>
+        void fillXImage(ImageView<T> im,
                         double x0, double dx, double dxy,
                         double y0, double dy, double dyx) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, int izero,
                         double ky0, double dky, int jzero) const;
-        void fillKValue(tmv::MatrixView<std::complex<double> > val,
+        template <typename T>
+        void fillKImage(ImageView<std::complex<T> > im,
                         double kx0, double dkx, double dkxy,
                         double ky0, double dky, double dkyx) const;
 
         typedef std::list<SBProfile>::iterator Iter;
         typedef std::list<SBProfile>::const_iterator ConstIter;
 
-        std::string repr() const;
+        std::string serialize() const;
 
     private:
 
         /// @brief The plist content is a pointer to a fresh copy of the summands.
-        std::list<SBProfile> _plist; 
+        std::list<SBProfile> _plist;
         double _sumflux; ///< Keeps track of the cumulated flux of all summands.
         double _sumfx; ///< Keeps track of the cumulated `fx` of all summands.
         double _sumfy; ///< Keeps track of the cumulated `fy` of all summands.
@@ -156,13 +160,46 @@ namespace galsim {
         /// @brief Keeps track of whether any summands have hard edges.
         bool _anyHardEdges;
 
-        /// @brief Keeps track of the cumulated `isAnalyticX()` property of all summands. 
-        bool _allAnalyticX; 
+        /// @brief Keeps track of the cumulated `isAnalyticX()` property of all summands.
+        bool _allAnalyticX;
 
         /// @brief Keeps track of the cumulated `isAnalyticK()` properties of all summands.
-        bool _allAnalyticK; 
+        bool _allAnalyticK;
 
         void initialize();  ///< Sets all private book-keeping variables to starting state.
+
+        void doFillXImage(ImageView<double> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillXImage(ImageView<double> im,
+                          double x0, double dx, double dxy,
+                          double y0, double dy, double dyx) const
+        { fillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        void doFillXImage(ImageView<float> im,
+                          double x0, double dx, int izero,
+                          double y0, double dy, int jzero) const
+        { fillXImage(im,x0,dx,izero,y0,dy,jzero); }
+        void doFillXImage(ImageView<float> im,
+                          double x0, double dx, double dxy,
+                          double y0, double dy, double dyx) const
+        { fillXImage(im,x0,dx,dxy,y0,dy,dyx); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<double> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, int izero,
+                          double ky0, double dky, int jzero) const
+        { fillKImage(im,kx0,dkx,izero,ky0,dky,jzero); }
+        void doFillKImage(ImageView<std::complex<float> > im,
+                          double kx0, double dkx, double dkxy,
+                          double ky0, double dky, double dkyx) const
+        { fillKImage(im,kx0,dkx,dkxy,ky0,dky,dkyx); }
 
         // Copy constructor and op= are undefined.
         SBAddImpl(const SBAddImpl& rhs);
@@ -172,4 +209,3 @@ namespace galsim {
 }
 
 #endif
-

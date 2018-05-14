@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -53,7 +53,7 @@ Use the galsim tag to flag it as a question about GalSim.
 
 
 
-Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 https://github.com/GalSim-developers
 
 Redistribution and use in source and binary forms, with or without
@@ -76,94 +76,104 @@ software or any products related to or derived from the software, or for
 lost profits, business interruption, or indirect special or consequential
 damages of any kind.
 """
+import re
 
 # The version is stored in _version.py as recommended here:
 # http://stackoverflow.com/questions/458550/standard-way-to-embed-version-into-python-package
 # We don't use setup.py, so it's not so important to do it this way, but if we ever switch...
 # And it does make it a bit easier to get the version number in SCons too.
-from _version import __version__, __version_info__
-
+from ._version import __version__
+vi = re.split('\.|-',__version__)
+__version_info__ = tuple([int(x) for x in vi if x.isdigit()])
 
 # Define the current code version, in addition to the hidden attribute, to be consistent with
 # previous GalSim versions that indicated the version number in this way.
 version = __version__
 
-# Two options for pyfits module:
-try:
-    import astropy.io.fits as pyfits
-    # astropy started their versioning over at 0.  (Understandably.)
-    # To make this seamless with pyfits versions, we add 4 to the astropy version.
-    from astropy import version as astropy_version
-    pyfits_version = str( (4 + astropy_version.major) + astropy_version.minor/10.)
-    pyfits_str = 'astropy.io.fits'
-except:
-    import pyfits
-    pyfits_version = pyfits.__version__
-    pyfits_str = 'pyfits'
-
 # Import things from other files we want to be in the galsim namespace
 
 # First some basic building blocks that don't usually depend on anything else
-from position import PositionI, PositionD
-from bounds import BoundsI, BoundsD
-from shear import Shear
-from angle import Angle, AngleUnit, radians, hours, degrees, arcmin, arcsec, HMS_Angle, DMS_Angle
-from catalog import Catalog, Dict
-from scene import COSMOSCatalog
-from table import LookupTable
+from .position import Position, PositionI, PositionD
+from .bounds import Bounds, BoundsI, BoundsD, _BoundsI, _BoundsD
+from .shear import Shear, _Shear
+from .angle import Angle, AngleUnit, _Angle, radians, hours, degrees, arcmin, arcsec
+from .catalog import Catalog, Dict, OutputCatalog
+from .scene import COSMOSCatalog
+from .table import LookupTable, LookupTable2D
 
 # Image
-from image import Image, ImageS, ImageI, ImageF, ImageD
+from .image import Image, ImageS, ImageI, ImageF, ImageD, ImageCF, ImageCD, ImageUS, ImageUI, _Image
+
+# PhotonArray
+from .photon_array import PhotonArray, WavelengthSampler, FRatioAngles, PhotonDCR
 
 # Noise
-from random import BaseDeviate, UniformDeviate, GaussianDeviate, PoissonDeviate, DistDeviate
-from random import BinomialDeviate, Chi2Deviate, GammaDeviate, WeibullDeviate
-from noise import BaseNoise, GaussianNoise, PoissonNoise, CCDNoise
-from noise import DeviateNoise, VariableGaussianNoise
-from correlatednoise import CorrelatedNoise, getCOSMOSNoise, UncorrelatedNoise
+from .random import BaseDeviate, UniformDeviate, GaussianDeviate, PoissonDeviate, DistDeviate
+from .random import BinomialDeviate, Chi2Deviate, GammaDeviate, WeibullDeviate
+from .noise import BaseNoise, GaussianNoise, PoissonNoise, CCDNoise
+from .noise import DeviateNoise, VariableGaussianNoise
+from .correlatednoise import CorrelatedNoise, getCOSMOSNoise, UncorrelatedNoise, CovarianceSpectrum
 
 # GSObject
-from base import GSParams, GSObject, Gaussian, Moffat, Airy, Kolmogorov, Pixel, Box, TopHat
-from base import Exponential, Sersic, DeVaucouleurs, Spergel
-from real import RealGalaxy, RealGalaxyCatalog, simReal
-from optics import OpticalPSF
-from shapelet import Shapelet, ShapeletSize, FitShapelet
-from interpolatedimage import Interpolant
-from interpolatedimage import Nearest, Linear, Cubic, Quintic, Lanczos, SincInterpolant, Delta
-from interpolatedimage import InterpolatedImage, InterpolatedKImage
-from compound import Add, Sum, Convolve, Convolution, Deconvolve, Deconvolution
-from compound import AutoConvolve, AutoConvolution, AutoCorrelate, AutoCorrelation
-from series import Series, SeriesConvolution
-from series import Spergelet, SpergelSeries
-from series import Moffatlet, MoffatSeries
-from series import LinearOpticalet, LinearOpticalSeries
-from transform import Transform, Transformation
+from .gsobject import GSObject
+from .gsparams import GSParams
+from .gaussian import Gaussian
+from .moffat import Moffat
+from .airy import Airy
+from .kolmogorov import Kolmogorov
+from .box import Pixel, Box, TopHat
+from .exponential import Exponential
+from .sersic import Sersic, DeVaucouleurs
+from .spergel import Spergel
+from .deltafunction import DeltaFunction
+from .real import RealGalaxy, RealGalaxyCatalog, ChromaticRealGalaxy
+from .phase_psf import Aperture, PhaseScreenList, PhaseScreenPSF, OpticalPSF
+from .phase_screens import AtmosphericScreen, Atmosphere, OpticalScreen
+from .shapelet import Shapelet
+from .inclined import InclinedExponential, InclinedSersic
+from .interpolant import Interpolant
+from .interpolant import Nearest, Linear, Cubic, Quintic, Lanczos, SincInterpolant, Delta
+from .interpolatedimage import InterpolatedImage, _InterpolatedImage
+from .interpolatedimage import InterpolatedKImage, _InterpolatedKImage
+from .sum import Add, Sum
+from .convolve import Convolve, Convolution, Deconvolve, Deconvolution
+from .convolve import AutoConvolve, AutoConvolution, AutoCorrelate, AutoCorrelation
+from .fouriersqrt import FourierSqrt, FourierSqrtProfile
+from .randwalk import RandomWalk
+from .transform import Transform, Transformation, _Transform
+from .vonkarman import VonKarman
+from .second_kick import SecondKick
+from .series import Series, SeriesConvolution
+from .series import Spergelet, SpergelSeries
+from .series import Moffatlet, MoffatSeries
+from .series import LinearOpticalet, LinearOpticalSeries
 
 # Chromatic
-from chromatic import ChromaticObject, ChromaticAtmosphere, Chromatic, ChromaticSum
-from chromatic import ChromaticConvolution, ChromaticDeconvolution, ChromaticAutoConvolution
-from chromatic import ChromaticAutoCorrelation, ChromaticTransformation
-from chromatic import ChromaticOpticalPSF, ChromaticAiry, InterpolatedChromaticObject
-from sed import SED
-from bandpass import Bandpass
+from .chromatic import ChromaticObject, ChromaticAtmosphere, ChromaticSum
+from .chromatic import ChromaticConvolution, ChromaticDeconvolution, ChromaticAutoConvolution
+from .chromatic import ChromaticAutoCorrelation, ChromaticTransformation
+from .chromatic import ChromaticFourierSqrtProfile
+from .chromatic import ChromaticOpticalPSF, ChromaticAiry, InterpolatedChromaticObject
+from .sed import SED
+from .bandpass import Bandpass
 
 # WCS
-from fits import FitsHeader
-from celestial import CelestialCoord
-from wcs import BaseWCS, PixelScale, ShearWCS, JacobianWCS
-from wcs import OffsetWCS, OffsetShearWCS, AffineTransform, UVFunction, RaDecFunction
-from fitswcs import AstropyWCS, PyAstWCS, WcsToolsWCS, GSFitsWCS, FitsWCS, TanWCS
+from .fits import FitsHeader
+from .celestial import CelestialCoord
+from .wcs import BaseWCS, PixelScale, ShearWCS, JacobianWCS
+from .wcs import OffsetWCS, OffsetShearWCS, AffineTransform, UVFunction, RaDecFunction
+from .fitswcs import AstropyWCS, PyAstWCS, WcsToolsWCS, GSFitsWCS, FitsWCS, TanWCS
 
 # Lensing stuff
-from lensing_ps import PowerSpectrum
-from nfw_halo import NFWHalo, Cosmology
+from .lensing_ps import PowerSpectrum
+from .nfw_halo import NFWHalo, Cosmology
 
 # Detector effects
-# Everything here is migrated into the Image class, so nothing to import by name.
-from . import detectors
+from .sensor import Sensor, SiliconSensor
+from . import detectors  # Everything here is a method of Image, so nothing to import by name.
 
 # Deprecation warning class
-from deprecated import GalSimDeprecationWarning
+from .deprecated import GalSimDeprecationWarning
 
 # Packages we intentionally keep separate.  E.g. requires galsim.fits.read(...)
 from . import fits
@@ -175,3 +185,7 @@ from . import hsm
 from . import dcr
 from . import meta_data
 from . import cdmodel
+from . import utilities
+from . import fft
+from . import download_cosmos
+from . import zernike

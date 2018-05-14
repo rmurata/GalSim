@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2015 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -16,10 +16,10 @@
 #    and/or other materials provided with the distribution.
 #
 """
-The galsim.wfirst module, containing information GalSim needs to simulate images for the WFIRST-AFTA
+The galsim.wfirst module, containing information GalSim needs to simulate images for the WFIRST
 project.
 
-This module contains numbers and routines for the WFIRST-AFTA project.  There is also a demo
+This module contains numbers and routines for the WFIRST project.  There is also a demo
 illustrating the use of most of this functionality, demo13.py.  Some of the parameters below relate
 to the entire wide-field imager.  Others, especially the return values of the functions to get the
 PSF and WCS, are specific to each SCA (Sensor Chip Assembly, the equivalent of a chip for an optical
@@ -35,7 +35,8 @@ inferred based on the capacitance.  To use a common language with that for CCDs,
 to quantities measured in units of e-/pixel, but for some detector non-idealities, it is important
 to keep in mind that it is voltage that is sensed.
 
-Currently, the module includes the following numbers:
+Currently, the module includes the following numbers, which were updated in October 2017 in
+preparation for the release of GalSim v1.5:
 
     gain - The gain for all SCAs (sensor chip assemblies) is expected to be the roughly the same,
            and we currently have no information about how different they will be, so this is a
@@ -74,7 +75,7 @@ Currently, the module includes the following numbers:
                         normalization factor already, and allows users to choose an exposure time or
                         use the default WFIRST exposure time.
 
-    read_noise - A total of 10e-.  This comes from 20 e- per correlated double sampling (CDS) and a
+    read_noise - A total of 8.5e-.  This comes from 20 e- per correlated double sampling (CDS) and a
                  5 e- floor, so the CDS read noise dominates.  The source of CDS read noise is the
                  noise introduced when subtracting a single pair of reads; this can be reduced by
                  averaging over multiple reads.  Also, this read_noise value might be reduced
@@ -88,10 +89,12 @@ Currently, the module includes the following numbers:
                           bandpasses can be obtained using the getBandpasses() routine described
                           below).
 
-    pupil_plane_file - The name of the file containing the image of the pupil plane for WFIRST-AFTA,
+    pupil_plane_file - The name of the file containing the image of the pupil plane for WFIRST,
                        to be used when constructing PSFs.  If using the galsim.wfirst.getPSF()
                        routine, users will not need to supply this filename, since the routine
                        already knows about it.
+
+    pupil_plane_scale - The pixel scale in meters per pixel for the image in pupil_plane_file.
 
     stray_light_fraction - The fraction of the sky background that is allowed to contribute as stray
                            light.  Currently this is required to be <10% of the background due to
@@ -100,6 +103,9 @@ Currently, the module includes the following numbers:
 
     ipc_kernel - The 3x3 kernel to be used in simulations of interpixel capacitance (IPC), using
                  galsim.wfirst.applyIPC().
+
+    persistence_coefficients - The retention fraction of the previous eight exposures in a simple,
+                               linear model for persistence.
 
     n_sca - The number of SCAs in the focal plane.
 
@@ -121,8 +127,8 @@ the detectors are subject to change as further lab tests are done.
 This module also contains the following routines:
 
     getBandpasses() - A utility to get a dictionary containing galsim.Bandpass objects for each of
-                      the WFIRST-AFTA imaging bandpasses, which by default will have their zero
-                      point set for the WFIRST-AFTA effective diameter and typical exposure time.
+                      the WFIRST imaging bandpasses, which by default will have their zero
+                      point set for the WFIRST effective diameter and typical exposure time.
 
     getSkyLevel() - A utility to find the expected sky level due to zodiacal light at a given
                     position, in a given band.
@@ -138,6 +144,9 @@ This module also contains the following routines:
                               the level expected for WFIRST.
 
     applyIPC() - A routine to incorporate the effects of interpixel capacitance in WFIRST images.
+
+    applyPersistence() - A routine to incorporate the effects of persistence - the residual images
+                         from earlier exposures after resetting.
 
     allDetectorEffects() - A routine to add all sources of noise and all (implemented) detector
                            effects to an image containing astronomical objects plus background.  In
@@ -172,47 +181,69 @@ This module also contains the following routines:
 
 All of the above routines have docstrings that can be accessed using
 help(galsim.wfirst.getBandpasses), and so on.
+
+Another routine that may be necessary is galsim.utilities.interleaveImages().
+The WFIRST PSFs at native WFIRST pixel scale are undersampled. A Nyquist-sampled PSF image can be
+obtained by a two-step process:
+1) Call the galsim.wfirst.getPSF() routine and convolve the PSF with the WFIRST pixel response to get
+the effective PSF.
+2) Draw the effective PSF onto an Image using drawImage routine, with a pixel scale lesser than the
+native pixel scale (using the 'method=no_pixel' option).
+
+However, if pixel-level effects such as nonlinearity and interpixel capacitance must be applied to
+the PSF images, then they must drawn at the native pixel scale. A Nyquist-sampled PSF image can be
+obtained in such cases by generating multiple images with offsets (a dither sequence) and then
+combining them using galsim.utilities.interleaveImages(). See docstring for more details on the
+usage.
 """
 import os
 import galsim
-import numpy
+import numpy as np
 
 gain = 1.0
-pixel_scale = 0.11
-diameter = 2.36
-obscuration = 0.3
-exptime = 168.1
-dark_current = 0.015
-nonlinearity_beta = -3.57e-7
+pixel_scale = 0.11  # arcsec / pixel
+diameter = 2.37  # meters
+obscuration = 0.32
+collecting_area = np.pi * diameter**2 / 4.0 * (1.0 - obscuration**2) * 1e4  # cm^2
+exptime = 140.25  # s
+dark_current = 0.015 # e-/pix/s
+nonlinearity_beta = -6.e-7
 reciprocity_alpha = 0.0065
-read_noise = 10.0
+read_noise = 8.5 # e-
 n_dithers = 6
-thermal_backgrounds = {'J129': 0.06,
-                       'F184': 1.18, 
-                       'Y106': 0.06,
-                       'Z087': 0.06,
-                       'H158': 0.08,
-                       'W149': 0.06}
+thermal_backgrounds = {'J129': 0.023, # e-/pix/s
+                       'F184': 0.179,
+                       'Y106': 0.023,
+                       'Z087': 0.023,
+                       'H158': 0.022,
+                       'W149': 0.023}
+
 pupil_plane_file = os.path.join(galsim.meta_data.share_dir,
                                 "WFIRST-AFTA_Pupil_Mask_C5_20141010_PLT.fits.gz")
+# The pupil plane image has non-zero values with a diameter of 1696 pixels.  The WFirst mirror
+# is 2.36 meters.  So the scale is 2.36 / 1696 = 0.00139151 meters/pixel.
+pupil_plane_scale = diameter / 1696.
+
 stray_light_fraction = 0.1
+
 # IPC kernel is unnormalized at first.  We will normalize it.
-ipc_kernel = numpy.array([ [0.001269938, 0.015399776, 0.001199862], \
-                           [0.013800177, 1.0, 0.015600367], \
-                           [0.001270391, 0.016129619, 0.001200137] ])
-ipc_kernel /= numpy.sum(ipc_kernel)
+ipc_kernel = np.array([ [0.001269938, 0.015399776, 0.001199862], \
+                        [0.013800177, 1.0, 0.015600367], \
+                        [0.001270391, 0.016129619, 0.001200137] ])
+ipc_kernel /= np.sum(ipc_kernel)
 ipc_kernel = galsim.Image(ipc_kernel)
+persistence_coefficients = np.array([0.045707683,0.014959818,0.009115737,0.00656769,0.005135571,0.004217028,0.003577534,0.003106601])/100.
 n_sca = 18
-n_pix_tot = 4096 
+n_pix_tot = 4096
 n_pix = 4088
 jitter_rms = 0.014
 charge_diffusion = 0.1
 
-from wfirst_bandpass import getBandpasses
-from wfirst_backgrounds import getSkyLevel
-from wfirst_psfs import getPSF, storePSFImages, loadPSFImages
-from wfirst_wcs import getWCS, findSCA, allowedPos, bestPA
-from wfirst_detectors import applyNonlinearity, addReciprocityFailure, applyIPC, allDetectorEffects
+from .wfirst_bandpass import getBandpasses
+from .wfirst_backgrounds import getSkyLevel
+from .wfirst_psfs import getPSF, storePSFImages, loadPSFImages
+from .wfirst_wcs import getWCS, findSCA, allowedPos, bestPA
+from .wfirst_detectors import applyNonlinearity, addReciprocityFailure, applyIPC, applyPersistence, allDetectorEffects
 
 def NLfunc(x):
     return x + nonlinearity_beta*(x**2)
@@ -222,7 +253,7 @@ def _parse_SCAs(SCAs):
     # convenient format.  It is used in wfirst_wcs.py and wfirst_psfs.py.
     #
     # Check which SCAs are to be done.  Default is all (and they are 1-indexed).
-    all_SCAs = numpy.arange(1, n_sca + 1, 1)
+    all_SCAs = np.arange(1, n_sca + 1, 1)
     # Later we will use the list of selected SCAs to decide which ones we're actually going to do
     # the calculations for.  For now, just check for invalid numbers.
     if SCAs is not None:

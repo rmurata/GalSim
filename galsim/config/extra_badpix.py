@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -46,8 +46,8 @@ class BadPixBuilder(ExtraOutputBuilder):
             # Make sure to only use the stamps for objects in this image.
             for obj_num in obj_nums:
                 stamp = self.scratch[obj_num]
-                b = stamp.bounds & image.getBounds()
-                if b.isDefined():
+                b = stamp.bounds & image.bounds
+                if b.isDefined():  # pragma: no branch
                     # This next line is equivalent to:
                     #    image[b] |= stamp[b]
                     # except that this doesn't work through the proxy.  We can only call methods

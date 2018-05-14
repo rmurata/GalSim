@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -70,12 +70,12 @@ def Great3Reject(config, base, value_type):
     # First get the sum of pixel values squared:
     sumsq = np.sum(im.array**2)
     # Get the noise variance for this stamp:
-    var = galsim.config.CalculateNoiseVar(base)
+    var = galsim.config.CalculateNoiseVariance(base)
 
-    # If the galaxy has a noise attribute, then we are in a real-galaxy branch, so we need to
+    # If the galaxy noise is not None, then we are in a real-galaxy branch, so we need to
     # subtract off the contribution of the image noise to sumsq.
     gal = galsim.config.GetCurrentValue('gal',base)
-    if hasattr(gal, 'noise'):
+    if gal.noise is not None:
         final = galsim.Convolve(gal,psf)
         current_noise_var = final.noise.getVariance()
         npix = np.prod(im.array.shape)
@@ -98,4 +98,3 @@ def Great3Reject(config, base, value_type):
 
 
 galsim.config.RegisterValueType('Great3Reject', Great3Reject, [ bool ])
-

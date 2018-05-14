@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -26,6 +26,8 @@ See documentation here:
 
     https://www.astromatic.net/pubsvn/software/psfex/trunk/doc/psfex.pdf
 """
+
+from past.builtins import basestring
 
 import galsim
 import galsim.config
@@ -104,7 +106,7 @@ class DES_PSFEx(object):
     def __init__(self, file_name, image_file_name=None, wcs=None, dir=None):
 
         if dir:
-            if not isinstance(file_name, str):
+            if not isinstance(file_name, basestring):
                 raise ValueError("Cannot provide dir and an HDU instance")
             import os
             file_name = os.path.join(dir,file_name)
@@ -114,7 +116,9 @@ class DES_PSFEx(object):
         if image_file_name:
             if wcs is not None:
                 raise AttributeError("Cannot provide both image_file_name and wcs")
-            self.wcs = galsim.GSFitsWCS(image_file_name)
+            header = galsim.FitsHeader(file_name=image_file_name)
+            wcs, origin = galsim.wcs.readFromFitsHeader(header)
+            self.wcs = wcs
         elif wcs:
             self.wcs = wcs
         else:
@@ -123,7 +127,7 @@ class DES_PSFEx(object):
 
     def read(self):
         from galsim._pyfits import pyfits
-        if isinstance(self.file_name, str):
+        if isinstance(self.file_name, basestring):
             hdu_list = pyfits.open(self.file_name)
             hdu = hdu_list[1]
         else:
@@ -216,7 +220,7 @@ class DES_PSFEx(object):
         if pol_group2 != 1:
             raise IOError("PSFEx: Expected POLGRP2 == 1, got %s"%pol_group2)
         if psf_naxis != 3:
-            raise IOError("PSFEx: Expected PSFNAXIS == 3, got %d"%psfnaxis)
+            raise IOError("PSFEx: Expected PSFNAXIS == 3, got %d"%psf_naxis)
         if psf_axis3 != ((pol_deg+1)*(pol_deg+2))//2:
             raise IOError("PSFEx: POLDEG and PSFAXIS3 disagree")
         if basis.shape[0] != psf_axis3:
@@ -248,14 +252,11 @@ class DES_PSFEx(object):
         else:
             return None
 
-    def getPSF(self, image_pos, pixel_scale=None, gsparams=None):
+    def getPSF(self, image_pos, gsparams=None):
         """Returns the PSF at position image_pos
 
         @param image_pos    The position in image coordinates at which to build the PSF.
         @param gsparams     (Optional) A GSParams instance to pass to the constructed GSObject.
-        @param pixel_scale  A deprecated parameter that is only present for backwards compatibility.
-                            If the constructor did not provide an image file or wcs, then
-                            this will use the pixel scale for an approximate wcs.
 
         @returns the PSF as a GSObject
         """
@@ -269,9 +270,6 @@ class DES_PSFEx(object):
         # This brings if from image coordinates to world coordinates.
         if self.wcs:
             psf = self.wcs.toWorld(psf, image_pos=image_pos)
-        elif pixel_scale:  # pragma: no cover
-            depr('pixel_scale',1.1,'wcs=PixelScale(pixel_scale) in the constructor for DES_PSFEx')
-            psf = galsim.PixelScale(pixel_scale).toWorld(psf)
 
         return psf
 
@@ -312,17 +310,7 @@ class PSFExLoader(galsim.config.InputLoader):
 
         if 'image_file_name' not in kwargs:
             if 'wcs' in base:
-                wcs = base['wcs']
-                if wcs.isLocal():
-                    # Then the wcs is already fine.
-                    pass
-                elif 'image_pos' in base:
-                    image_pos = base['image_pos']
-                    wcs = wcs.local(image_pos)
-                    safe = False
-                else:
-                    raise RuntimeError("No image_pos found in config, but wcs is not local.")
-                kwargs['wcs'] = wcs
+                kwargs['wcs'] = base['wcs']
             else:
                 # Then we aren't doing normal config processing, so just use pixel scale = 1.
                 kwargs['wcs'] = galsim.PixelScale(1.)
@@ -377,4 +365,3 @@ def BuildDES_PSFEx(config, base, ignore, gsparams, logger):
 
 # Register this builder with the config framework:
 galsim.config.RegisterObjectType('DES_PSFEx', BuildDES_PSFEx, input_type='des_psfex')
-

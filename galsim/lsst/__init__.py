@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+# Copyright (c) 2012-2018 by the GalSim developers team on GitHub
 # https://github.com/GalSim-developers
 #
 # This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -16,5 +16,4 @@
 #    and/or other materials provided with the distribution.
 #
 
-#from .lsst_wcs import LsstWCS, LsstCamera
 from .lsst_psf import getPSF

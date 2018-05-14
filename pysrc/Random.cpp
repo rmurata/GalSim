@@ -1,5 +1,5 @@
 /* -*- c++ -*-
- * Copyright (c) 2012-2016 by the GalSim developers team on GitHub
+ * Copyright (c) 2012-2018 by the GalSim developers team on GitHub
  * https://github.com/GalSim-developers
  *
  * This file is part of GalSim: The modular galaxy image simulation toolkit.
@@ -17,295 +17,86 @@
  *    and/or other materials provided with the distribution.
  */
 
-#include "galsim/IgnoreWarnings.h"
-
-#define BOOST_NO_CXX11_SMART_PTR
-#include "boost/python.hpp"
+#include "PyBind11Helper.h"
 #include "Random.h"
-#include "NumpyHelper.h"
-
-namespace bp = boost::python;
-
-
-// Note that class docstrings for all of these are now added in galsim/random.py
 
 namespace galsim {
 
-    // Need this special CallBack version that inherits from bp::wrapper whenever
-    // you are wrapping something that has virtual functions you want to call from
-    // python and have them resolve correctly.
-    class BaseDeviateCallBack : public BaseDeviate,
-                                public bp::wrapper<BaseDeviate>
+    void Generate(BaseDeviate& rng, size_t N, size_t idata)
     {
-    public:
-        BaseDeviateCallBack(long lseed=0) : BaseDeviate(lseed) {}
-        BaseDeviateCallBack(const BaseDeviate& rhs) : BaseDeviate(rhs) {}
-        BaseDeviateCallBack(std::string& str) : BaseDeviate(str) {}
-        ~BaseDeviateCallBack() {}
-
-    protected:
-        // This is the special magic needed so the virtual function calls back to the
-        // function defined in the python layer.
-        double _val()
-        {
-            if (bp::override py_func = this->get_override("_val"))
-                return py_func();
-            else
-                return BaseDeviate::_val();
-        }
-    };
-
-    void Generate(BaseDeviate& rng, const bp::object& array)
-    {
-        double* data;
-        boost::shared_ptr<double> owner;
-        int step, stride;
-        CheckNumpyArray(array, 1, false, data, owner, step, stride);
-        if (step != 1 || stride != 1)
-            throw std::runtime_error("generate requires a contiguous numpy array");
-        int N = GetNumpyArrayDim(array.ptr(), 0);
+        double* data = reinterpret_cast<double*>(idata);
         rng.generate(N, data);
     }
 
-    struct PyBaseDeviate {
+    void AddGenerate(BaseDeviate& rng, size_t N, size_t idata)
+    {
+        double* data = reinterpret_cast<double*>(idata);
+        rng.addGenerate(N, data);
+    }
 
-        static void wrap() {
-            bp::class_<BaseDeviateCallBack>
-                pyBaseDeviate("BaseDeviate", "", bp::no_init);
-            pyBaseDeviate
-                .def(bp::init<long>(bp::arg("seed")=0))
-                .def(bp::init<const BaseDeviate&>(bp::arg("seed")))
-                .def(bp::init<std::string>(bp::arg("seed")))
-                .def("seed", (void (BaseDeviate::*) (long) )&BaseDeviate::seed,
-                     (bp::arg("seed")=0))
-                .def("reset", (void (BaseDeviate::*) (long) )&BaseDeviate::reset,
-                     (bp::arg("seed")=0))
-                .def("reset", (void (BaseDeviate::*) (const BaseDeviate&) )&BaseDeviate::reset,
-                     (bp::arg("seed")))
-                .def("clearCache", &BaseDeviate::clearCache)
-                .def("serialize", &BaseDeviate::serialize)
-                .def("duplicate", &BaseDeviate::duplicate)
-                .def("discard", &BaseDeviate::discard)
-                .def("raw", &BaseDeviate::raw)
-                .def("generate", &Generate, bp::arg("array"))
-                .def("__repr__", &BaseDeviate::repr)
-                .def("__str__", &BaseDeviate::str)
-                .enable_pickling()
-                ;
+    void GenerateFromVariance(GaussianDeviate& rng, size_t N, size_t idata)
+    {
+        double* data = reinterpret_cast<double*>(idata);
+        rng.generateFromVariance(N, data);
+    }
 
-            // This lets python recognize functions that return a shared_ptr<BaseDeviate>
-            // as a python BaseDeviate object.  This is needed for the BaseNoise::getRNG()
-            // function _if_ the BaseNoise was default constructed.  As far as I understand it,
-            // if you construct a BaseDeviate object in python and then use that to construct
-            // a BaseNoise object:
-            //
-            //     >>> rng = galsim.BaseDeviate()
-            //     >>> gn = galsim.GauusianNoise(rng)
-            //
-            // then the `gn.getRNG()` call doesn't need anything special because the actual
-            // BaseDeviate being wrapped in the shared_ptr is really a BaseDeviateCallBack.
-            // So boost python knows how to handle it.
-            //
-            // But if the BaseDeviate was constructed in the C++ layer, which happens when you
-            // default construct the BaseNoise object:
-            //
-            //     >>> gn = galsim.GaussianNoise()
-            //
-            // then the `gn.getRNG()` call returns a real BaseDeviate object in the shared_ptr.
-            // So python doesn't really know what that is without this next line.  The
-            // register_ptr_to_python call tells boost that a shared_ptr<BaseDeviate> in the
-            // C++ layer should be treated like a BaseDeviate in the python layer.
-            bp::register_ptr_to_python< boost::shared_ptr<BaseDeviate> >();
-        }
+    void GenerateFromExpectation(PoissonDeviate& rng, size_t N, size_t idata)
+    {
+        double* data = reinterpret_cast<double*>(idata);
+        rng.generateFromExpectation(N, data);
+    }
 
-    };
+    void pyExportRandom(PY_MODULE& _galsim)
+    {
+        py::class_<BaseDeviate> (GALSIM_COMMA "BaseDeviateImpl" BP_NOINIT)
+            .def(py::init<long>())
+            .def(py::init<const BaseDeviate&>())
+            .def(py::init<const char*>())
+            .def("seed", (void (BaseDeviate::*) (long) )&BaseDeviate::seed)
+            .def("reset", (void (BaseDeviate::*) (const BaseDeviate&) )&BaseDeviate::reset)
+            .def("clearCache", &BaseDeviate::clearCache)
+            .def("serialize", &BaseDeviate::serialize)
+            .def("discard", &BaseDeviate::discard)
+            .def("raw", &BaseDeviate::raw)
+            .def("generate", &Generate)
+            .def("add_generate", &AddGenerate);
 
-    struct PyUniformDeviate {
+        py::class_<UniformDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "UniformDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&>())
+            .def("generate1", &UniformDeviate::generate1);
 
-        static void wrap() {
-            bp::class_<UniformDeviate, bp::bases<BaseDeviate> >
-                pyUniformDeviate("UniformDeviate", "", bp::no_init);
-            pyUniformDeviate
-                .def(bp::init<long>(bp::arg("seed")=0))
-                .def(bp::init<const BaseDeviate&>(bp::arg("seed")))
-                .def(bp::init<std::string>(bp::arg("seed")))
-                .def("duplicate", &UniformDeviate::duplicate)
-                .def("__call__", &UniformDeviate::operator())
-                .enable_pickling()
-                ;
-        }
+        py::class_<GaussianDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "GaussianDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, double, double>())
+            .def("generate1", &GaussianDeviate::generate1)
+            .def("generate_from_variance", &GenerateFromVariance);
 
-    };
+        py::class_<BinomialDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "BinomialDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, int, double>())
+            .def("generate1", &BinomialDeviate::generate1);
 
-    struct PyGaussianDeviate {
+        py::class_<PoissonDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "PoissonDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, double>())
+            .def("generate1", &PoissonDeviate::generate1)
+            .def("generate_from_expectation", &GenerateFromExpectation);
 
-        static void wrap() {
-            bp::class_<GaussianDeviate, bp::bases<BaseDeviate> >
-                pyGaussianDeviate("GaussianDeviate", "", bp::no_init);
-            pyGaussianDeviate
-                .def(bp::init<long, double, double>(
-                        (bp::arg("seed")=0, bp::arg("mean")=0., bp::arg("sigma")=1.)
-                ))
-                .def(bp::init<const BaseDeviate&, double, double>(
-                        (bp::arg("seed"), bp::arg("mean")=0., bp::arg("sigma")=1.)
-                ))
-                .def(bp::init<std::string, double, double>(
-                        (bp::arg("seed"), bp::arg("mean")=0., bp::arg("sigma")=1.)
-                ))
-                .def("duplicate", &GaussianDeviate::duplicate)
-                .def("__call__", &GaussianDeviate::operator())
-                .def("getMean", &GaussianDeviate::getMean)
-                .def("getSigma", &GaussianDeviate::getSigma)
-                .def("_setMean", &GaussianDeviate::setMean)
-                .def("_setSigma", &GaussianDeviate::setSigma)
-                .enable_pickling()
-                ;
-        }
+        py::class_<WeibullDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "WeibullDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, double, double>())
+            .def("generate1", &WeibullDeviate::generate1);
 
-    };
+        py::class_<GammaDeviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "GammaDeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, double, double>())
+            .def("generate1", &GammaDeviate::generate1);
 
-    struct PyBinomialDeviate {
-
-        static void wrap() {
-            bp::class_<BinomialDeviate, bp::bases<BaseDeviate> >
-                pyBinomialDeviate("BinomialDeviate", "", bp::no_init);
-            pyBinomialDeviate
-                .def(bp::init<long, int, double>(
-                        (bp::arg("seed")=0, bp::arg("N")=1, bp::arg("p")=0.5)
-                ))
-                .def(bp::init<const BaseDeviate&, int, double>(
-                        (bp::arg("seed"), bp::arg("N")=1, bp::arg("p")=0.5)
-                ))
-                .def(bp::init<std::string, int, double>(
-                        (bp::arg("seed")=0, bp::arg("N")=1, bp::arg("p")=0.5)
-                ))
-                .def("duplicate", &BinomialDeviate::duplicate)
-                .def("__call__", &BinomialDeviate::operator())
-                .def("getN", &BinomialDeviate::getN)
-                .def("getP", &BinomialDeviate::getP)
-                .def("_setN", &BinomialDeviate::setN)
-                .def("_setP", &BinomialDeviate::setP)
-                .enable_pickling()
-                ;
-        }
-
-    };
-
-    struct PyPoissonDeviate {
-
-        static void wrap() {
-            bp::class_<PoissonDeviate, bp::bases<BaseDeviate> >
-                pyPoissonDeviate("PoissonDeviate", "", bp::no_init);
-            pyPoissonDeviate
-                .def(bp::init<long, double>(
-                        (bp::arg("seed")=0, bp::arg("mean")=1.)
-                ))
-                .def(bp::init<const BaseDeviate&, double>(
-                        (bp::arg("seed"), bp::arg("mean")=1.)
-                ))
-                .def(bp::init<std::string, double>(
-                        (bp::arg("seed")=0, bp::arg("mean")=1.)
-                ))
-                .def("duplicate", &PoissonDeviate::duplicate)
-                .def("__call__", &PoissonDeviate::operator())
-                .def("getMean", &PoissonDeviate::getMean)
-                .def("_setMean", &PoissonDeviate::setMean)
-                .enable_pickling()
-                ;
-        }
-
-    };
-
-    struct PyWeibullDeviate {
-
-        static void wrap() {
-
-            bp::class_<WeibullDeviate, bp::bases<BaseDeviate> >
-                pyWeibullDeviate("WeibullDeviate", "", bp::no_init);
-            pyWeibullDeviate
-                .def(bp::init<long, double, double>(
-                        (bp::arg("seed")=0, bp::arg("a")=1., bp::arg("b")=1.)
-                ))
-                .def(bp::init<const BaseDeviate&, double, double>(
-                        (bp::arg("seed"), bp::arg("a")=1., bp::arg("b")=1.)
-                ))
-                .def(bp::init<std::string, double, double>(
-                        (bp::arg("seed")=0, bp::arg("a")=1., bp::arg("b")=1.)
-                ))
-                .def("duplicate", &WeibullDeviate::duplicate)
-                .def("__call__", &WeibullDeviate::operator())
-                .def("getA", &WeibullDeviate::getA)
-                .def("getB", &WeibullDeviate::getB)
-                .def("_setA", &WeibullDeviate::setA)
-                .def("_setB", &WeibullDeviate::setB)
-                .enable_pickling()
-                ;
-        }
-
-    };
-
-    struct PyGammaDeviate {
-
-        static void wrap() {
-            bp::class_<GammaDeviate, bp::bases<BaseDeviate> >
-                pyGammaDeviate("GammaDeviate", "", bp::no_init);
-            pyGammaDeviate
-                .def(bp::init<long, double, double>(
-                        (bp::arg("seed")=0, bp::arg("k")=1., bp::arg("theta")=1.)
-                ))
-                .def(bp::init<const BaseDeviate&, double, double>(
-                        (bp::arg("seed"), bp::arg("k")=1., bp::arg("theta")=1.)
-                ))
-                .def(bp::init<std::string, double, double>(
-                        (bp::arg("seed")=0, bp::arg("k")=1., bp::arg("theta")=1.)
-                ))
-                .def("duplicate", &GammaDeviate::duplicate)
-                .def("__call__", &GammaDeviate::operator())
-                .def("getK", &GammaDeviate::getK)
-                .def("getTheta", &GammaDeviate::getTheta)
-                .def("_setK", &GammaDeviate::setK)
-                .def("_setTheta", &GammaDeviate::setTheta)
-                .enable_pickling()
-                ;
-        }
-
-    };
-
-    struct PyChi2Deviate {
-
-        static void wrap() {
-            bp::class_<Chi2Deviate, bp::bases<BaseDeviate> >
-                pyChi2Deviate("Chi2Deviate", "", bp::no_init);
-            pyChi2Deviate
-                .def(bp::init<long, double>(
-                        (bp::arg("seed")=0, bp::arg("n")=1.)
-                ))
-                .def(bp::init<const BaseDeviate&, double>(
-                        (bp::arg("seed"), bp::arg("n")=1.)
-                ))
-                .def(bp::init<std::string, double>(
-                        (bp::arg("seed")=0, bp::arg("n")=1.)
-                ))
-                .def("duplicate", &Chi2Deviate::duplicate)
-                .def("__call__", &Chi2Deviate::operator())
-                .def("getN", &Chi2Deviate::getN)
-                .def("_setN", &Chi2Deviate::setN)
-                .enable_pickling()
-                ;
-        }
-
-    };
-
-
-    void pyExportRandom() {
-        PyBaseDeviate::wrap();
-        PyUniformDeviate::wrap();
-        PyGaussianDeviate::wrap();
-        PyBinomialDeviate::wrap();
-        PyPoissonDeviate::wrap();
-        PyWeibullDeviate::wrap();
-        PyGammaDeviate::wrap();
-        PyChi2Deviate::wrap();
+        py::class_<Chi2Deviate, BP_BASES(BaseDeviate)>(
+            GALSIM_COMMA "Chi2DeviateImpl" BP_NOINIT)
+            .def(py::init<const BaseDeviate&, double>())
+            .def("generate1", &Chi2Deviate::generate1);
     }
 
 } // namespace galsim

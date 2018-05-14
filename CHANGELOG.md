@@ -1,116 +1,83 @@
-Changes from v1.4 to v1.5
+Changes from v1.6 to v2.0
 =========================
+
+The principal change in GalSim 2.0 is that it is now pip installable.
+See the updated INSTALL file for details on how to install GalSim using
+either pip or setup.py.
+
+Dependency Changes
+------------------
+
+- Added LSSTDESC.Coord, which contains the functionality that used to be in
+  GalSim as the Angle and CelestialCoord classes.  We moved it to a separate
+  repo so people could more easily use this functionality without requiring all
+  of GalSim as a dependency. (#809b)
+- Removed dependency on boost. (#809)
+- Removed dependency on TMV. (#809)
+- Added dependency on pybind11. (#809)
+- Added dependency on Eigen. (#809)
+- FFTW is now the only dependency that pip cannot handle automatically. (#809)
+- Officially no longer support Python 2.6. (Pretty sure no one cares.)
+
 
 API Changes
 -----------
 
-- Simplified the return value of galsim.config.ReadConfig. (#580)
-- Changed the dimensions of `SED` from [photons/wavelength-interval] to either
-  [photons/wavelength-interval/area/time] or [1] (dimensionless).
-  `ChromaticObject`s representing stars or galaxies take SEDs with the former
-  dimensions; those representing a chromatic PSF take SEDs with the latter
-  dimensions. (#789)
-- Added keywords `exptime` and `area` to `drawImage()` to indicate the image
-  exposure time and telescope collecting area. (#789)
-- Added restrictions to `ChromaticObject`s and `SED`s consistent with
-  dimensional analysis.  E.g., only `ChromaticObject`s with dimensionful SEDs
-  can be drawn. (#789)
-- Changed `drawKImage` to return a single ImageC instance rather than two
-  ImageD instances (for real and imag parts).  The old syntax of
-  `re, im = obj.drawKImage(...)` will still work, but it will raise a
-  deprecation warning. (#799)
-- Changed `InterpolatedKImage` to take an ImageC rather than two ImageD
-  instances. The old syntax will work, but it will raise a deprecation
-  warning. (#799)
-
-
-Dependency Changes
-------------------
-- Added `astropy` as a required dependency for chromatic functionality. (#789)
+- Most of the functionality associated with C++-layer objects has been
+  redesigned or removed.  These were non-public-API features, so if you have
+  been using the public API, you should be fine.  But if you have been relying
+  on features of the exposed C++-layer, this might break your code. (#809)
+- There were some minor API changes to the Angle and CelestialCoord classes we
+  made when we moved it over into LSSTDESC.Coord.  Some were to sever (weak)
+  ties to other GalSim classes and some were just deemed API improvements.
+  Most of these were already deprecated in v1.5.  The ones that we were not
+  able to deprecate (and preserve the existing functionality) in advance of
+  v2.0 are the `CelestialCoord.project` and `deproject` functions.  The new
+  functionality has better units handing (taking and returning Angles rather
+  then PositionD instances).  If you have been using these functions, you
+  should check the new doc strings for the appropriate types and units for the
+  parameters and return values. (#809b)
+- The return type of a LookupTable when given a list or tuple input is now a
+  numpy array rather than a list or tuple. (#809e)
+- The return type of Bandpass and SED calls when given a list or tuple input
+  is also now a numpy array. (#809e)
+- Similarly, the output of getShear, getConvergence and similar methods of
+  NFWHalo and PowerSpectrum are always either scalars or numpy arrays. (#809e)
+- The attribute half_light_radius of both InclinedExponential and
+  InclinedSersic has been changed to disk_half_light_radius, since it does
+  not really correspond to the realized half-light radius of the inclined
+  profile (unless the inclination angle is 0 degrees). (#809f)
+- Removed galsim_yaml and galsim_json scripts, which were essentially just
+  aliases for galsim -f yaml and galsim -f json respectively. (#809f)
+- Removed lsst module, which depended on the LSST stack and had gotten quite
+  out of sync and broken. (#964)
 
 
 Bug Fixes
 ---------
 
-- Added checks to `SED`s and `ChromaticObject`s for dimensional sanity. (#789)
-- Fixed an error in the magnification calculated by NFWHalo.getLensing(). (#580)
-- Fixed bug when whitening noise in images based on COSMOS training datasets
-  using the config functionality. (#792)
-- Fixed some handling of images with undefined bounds. (#799)
-
 
 Deprecated Features
 -------------------
 
-- Deprecated `Chromatic` class.  This functionality has been subsumed by
-  `ChromaticTransformation`.  (#789)
-- Deprecated `.copy()` methods for immutable classes, including `GSObject`,
-  `ChromaticObject`, `SED`, and `Bandpass`, which are unnecessary. (#789)
-- Deprecated `wmult` parameter of `drawImage`. (#799)
-- Deprecated `Image.at` method. Normally im(x,y) or im[x,y] would be the
-  preferred syntax, but for the case where you want a named method, the
-  new name is `getValue` in parallel with `setValue`. (#799)
-- Deprecated `gain` parameter of `drawKImage`.  It does not really make
-  sense.  If you had been using it, you should instead just divide the
-  returned image by gain, which will have the same effect and probably
-  be clearer in your own code about what you meant. (#799)
+- Removed all features deprecated in 1.x versions.
 
 
 New Features
 ------------
 
-- Added support for reading in of unsigned int Images (#715)
-- Added ability to specify optical aberrations in terms of annular Zernike
-  coefficients.  (#771)
-- Added ability to use `numpy`, `np`, or `math` in all places where we evaluate
-  user input, including DistDeviate (aka RandomDistribution in config files),
-  PowerSpectrum, UVFunction, RaDecFunction, Bandpass, and SED.  Some of these
-  had allowed `np.` for numpy commands, but inconsistently, so now they should
-  all reliably work with any of these three module names. (#776)
-- `SED`s can now be constructed with flexible units via the `astropy.units`
-  module. (#789).
-- Added new surface brightness profile, 'InclinedExponential'. This represents
-  the 2D projection the 3D profile:
-      I(R,z) = I_0 / (2h_s) * sech^2 (z/h_s) * exp(-R/R_s),
-  inclined to the line of sight at a desired angle. If face-on (inclination =
-  0 degrees), this will be identical to the Exponential profile.  (#782)
-- Added possibility of using `dtype=complex` for Images, the shorthand alias
-  for which is called ImageC. (#799)
-- Added `maxSB()` method to GSObjects to return an estimate of the maximum
-  surface brightness.  For analytic profiles, it returns the correct value,
-  but for compound objects (convolutions in particular), it cannot know the
-  exact value without fully drawing the object (which would defeat the point
-  for the use cases where we want this information).  So it does its best to
-  estimate something close, generally erring on the high side.  So the true
-  maximum SB <~ obj.maxSB(). (#799)
-- Added `im[x,y] = value` as a valid replacement for im.setValue(x,y,value).
-  Likewise `value = im[x,y]` is equivalent to `value = im(x,y)` or `value =
-  im.getValue(x,y)`. (#799).
-- Added ability to do FFTs directly on images.  The relevant methods for
-  doing so are `im.calculate_fft()` and `im.calculate_inverse_fft()`.  There
-  is also `im.wrap()` which can be used to wrap an image prior to doing the
-  FFT to properly alias the data if necessary. (#799)
-- Added new profile `galsim.RandomWalk`, a class for generating a set of
-  point sources distributed using a random walk.  Uses of this profile include
-  representing an "irregular" galaxy, or adding this profile to an Exponential
-  to represent knots of star formation. (#819)
-- Added 'generate' function to BaseDeviate and 'sed.sampleWavelength' to draw
-  random wavelengths from an SED. (#822)
-- Added function assignPhotonAngles to add arrival directions (in the form of
-  dx/dz and dy/dz slopes) to an existing photon array. (#823)
-- Added `surface_ops` option to `drawImage` function, which applies a list of
-  surface operations to the photon array before accumulating on the image.
-  (#827)
-- Added `ii_pad_factor` kwarg to PhaseScreenPSF and OpticalPSF to control the
-  zero-padding of the underlying InterpolatedImage. (#835)
-- Added galsim.fft module that includes functions that act as drop-in
-  replacements for np.fft functions, but using the C-layer FFTW package.
-  Our functions have more restrictions on the input arrays, but when valid
-  are genarally somewhat faster than the numpy functions. (#840)
-
-
-New config features
--------------------
-
-- Output slightly more information about the COSMOSCatalog() (if any) being used
-  as the basis of simulations, at the default verbosity level. (#804)
+- Added Zernike submodule. (#832, #951)
+- Updated PhaseScreen wavefront and wavefront_gradient methods to accept `None`
+  as a valid time argument, which means to use the internally stored time in
+  the screen(s). (#864)
+- Added SecondKick profile GSObject. (#864)
+- Updated PhaseScreenPSFs to automatically include SecondKick objects when
+  being drawn with geometric photon shooting. (#864)
+- Added option to use circular weight function in HSM adaptive moments code.
+  (#917)
+- Added VonKarman profile GSObject. (#940)
+- Added PhotonDCR surface op to apply DCR for photon shooting. (#955)
+- Added astropy units as allowed values of wave_type in Bandpass. (#955)
+- Added ability to get net pixel areas from the Silicon code for a given flux
+  image. (#963)
+- Added ability to transpose the meaning of (x,y) in the Silicon class. (#963)

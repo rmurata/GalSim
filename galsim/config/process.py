@@ -788,9 +788,9 @@ def Process(config, logger=None, njobs=1, job=1, new_params=None, except_abort=F
 
     if nfiles == 1:
         except_abort = True  # Mostly just so the message reads better.
-    galsim.config.BuildFiles(nfiles, config, file_num=start, logger=logger,
-                             except_abort=except_abort)
-
+    file_info = galsim.config.BuildFiles(nfiles, config, file_num=start, logger=logger,
+                                         except_abort=except_abort)
+    return file_info
 
 def MultiProcess(nproc, config, job_func, tasks, item, logger=None,
                  done_func=None, except_func=None, except_abort=True):

@@ -158,6 +158,7 @@ def BuildFiles(nfiles, config, file_num=0, logger=None, except_abort=False):
             logger.warning('Total time for %d files with %d processes = %f sec',
                            nfiles_written,nproc,t2-t1)
         logger.warning('Done building files')
+    return results
 
 
 output_ignore = [ 'nproc', 'skip', 'noclobber', 'retry_io' ]
@@ -243,11 +244,11 @@ def BuildFile(config, file_num=0, image_num=0, obj_num=0, logger=None):
     RetryIO(builder.writeFile, args, ntries, file_name, logger)
     logger.debug('file %d: Wrote %s to file %r',file_num,output_type,file_name)
 
-    builder.writeExtraOutputs(config, data, logger)
+    extra_filenames = builder.writeExtraOutputs(config, data, logger)
 
     t2 = time.time()
 
-    return file_name, t2-t1
+    return file_name, t2-t1, extra_filenames
 
 def GetNFiles(config):
     """

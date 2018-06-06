@@ -20,20 +20,7 @@ import os
 import galsim
 import logging
 import copy
-
-
-# Python 2.6 doesn't include OrderedDict natively.  There is a package ordereddict that you
-# can pip install.  But if the user hasn't done that, we'll just read into a regular dict.
-# The only feature that requires the OrderedDict is the truth catalog output.  With a regular
-# dict the columns will appear in arbitrary order.
-try:
-    from collections import OrderedDict
-except ImportError:
-    try:
-        from ordereddict import OrderedDict
-    except ImportError:
-        OrderedDict = dict
-
+from collections import OrderedDict
 
 def MergeConfig(config1, config2, logger=None):
     """
@@ -123,20 +110,8 @@ def ReadJson(config_file):
     import json
 
     with open(config_file) as f:
-        try:
-            # cf. http://stackoverflow.com/questions/6921699/can-i-get-json-to-load-into-an-ordereddict-in-python
-            config = json.load(f, object_pairs_hook=OrderedDict)
-        except TypeError:  # pragma: no cover
-            # for python2.6, json doesn't come with the object_pairs_hook, so
-            # try using simplejson, and if that doesn't work, just use a regular dict.
-            # Also, it seems that if the above line raises an exception, the file handle
-            # is not left at the beginning, so seek back to 0.
-            f.seek(0)
-            try:
-                import simplejson
-                config = simplejson.load(f, object_pairs_hook=OrderedDict)
-            except ImportError:
-                config = json.load(f)
+        # cf. http://stackoverflow.com/questions/6921699/can-i-get-json-to-load-into-an-ordereddict-in-python
+        config = json.load(f, object_pairs_hook=OrderedDict)
 
     # JSON files only ever define a single job, but we need to return a list with this one item.
     return [config]
@@ -283,7 +258,7 @@ def CopyConfig(config):
     config1 = copy.copy(config)
 
     # Make sure the input_manager isn't in the copy
-    config1.pop('input_manager',None)
+    config1.pop('_input_manager',None)
 
     # Now deepcopy all the regular config fields to make sure things like current don't
     # get clobbered by two processes writing to the same dict.  Also the rngs.
@@ -604,7 +579,8 @@ def ParseExtendedKey(config, key):
         except (TypeError, KeyError):
             # TypeError for the case where d is a float or Position2D, so d[k] is invalid.
             # KeyError for the case where d is a dict, but k is not a valid key.
-            raise ValueError("Unable to parse extended key %s.  Field %s is invalid."%(key,k))
+            raise galsim.GalSimConfigError(
+                "Unable to parse extended key %s.  Field %s is invalid."%(key,k))
     return d, k
 
 def GetFromConfig(config, key):
@@ -623,7 +599,8 @@ def GetFromConfig(config, key):
     try:
         value = d[k]
     except Exception as e:
-        raise ValueError("Unable to parse extended key %s.  Field %s is invalid."%(key,k))
+        raise galsim.GalSimConfigError(
+            "Unable to parse extended key %s.  Field %s is invalid."%(key,k))
     return value
 
 def SetInConfig(config, key, value):
@@ -646,7 +623,8 @@ def SetInConfig(config, key, value):
         try:
             d[k] = value
         except Exception as e:
-            raise ValueError("Unable to parse extended key %s.  Field %s is invalid."%(key,k))
+            raise galsim.GalSimConfigError(
+                "Unable to parse extended key %s.  Field %s is invalid."%(key,k))
 
 
 def UpdateConfig(config, new_params):
@@ -742,11 +720,11 @@ def Process(config, logger=None, njobs=1, job=1, new_params=None, except_abort=F
     logger = LoggerWrapper(logger)
     import pprint
     if njobs < 1:
-        raise ValueError("Invalid number of jobs %d"%njobs)
+        raise galsim.GalSimValueError("Invalid number of jobs",njobs)
     if job < 1:
-        raise ValueError("Invalid job number %d.  Must be >= 1."%job)
+        raise galsim.GalSimValueError("Invalid job number.  Must be >= 1.",job)
     if job > njobs:
-        raise ValueError("Invalid job number %d.  Must be <= njobs (%d)"%(job,njobs))
+        raise galsim.GalSimValueError("Invalid job number.  Must be <= njobs (%d)"%(njobs),job)
 
     # First thing to do is deep copy the input config to make sure we don't modify the original.
     config = CopyConfig(config)
@@ -1029,7 +1007,7 @@ def GetIndex(config, base, is_sequence=False):
     if 'index_key' in config:
         index_key = config['index_key']
         if index_key not in valid_index_keys:
-            raise AttributeError("Invalid index_key=%s."%index_key)
+            raise galsim.GalSimConfigValueError("Invalid index_key.", index_key, valid_index_keys)
     else:
         index_key = base.get('index_key','obj_num')
         if index_key == 'obj_num' and is_sequence:
@@ -1061,13 +1039,18 @@ def GetRNG(config, base, logger=None, tag=''):
     index, index_key = GetIndex(config, base)
     logger.debug("GetRNG for %s: %s",index_key,index)
 
-    if 'rng_num' in config:
-        rng_num = config['rng_num']
+    rng_num = config.get('rng_num', 0)
+    if rng_num != 0:
         if int(rng_num) != rng_num:
-            raise ValueError("rng_num must be an integer")
-        if not (index_key + '_rngs') in base:
-            raise AttributeError("rng_num is only allowed when image.random_seed is a list")
-        rng = base.get(index_key + '_rngs', None)[int(rng_num)]
+            raise galsim.GalSimConfigValueError("rng_num must be an integer", rng_num)
+        rngs = base.get(index_key + '_rngs', None)
+        if rngs is None:
+            raise galsim.GalSimConfigError(
+                "rng_num is only allowed when image.random_seed is a list")
+        if rng_num < 0 or rng_num > len(rngs):
+            raise galsim.GalSimConfigError(
+                "rng_num is invalid.  Must be in [0,%d]"%(len(rngs)))
+        rng = rngs[int(rng_num)]
     else:
         rng = base.get(index_key + '_rng', None)
 
@@ -1084,7 +1067,7 @@ def GetRNG(config, base, logger=None, tag=''):
 
     return rng
 
-def CleanConfig(config): # pragma: no cover
+def CleanConfig(config, keep_current=False):
     """Return a "clean" config dict without any leading-underscore values
 
     GalSim config dicts store a lot of ancillary information internally to help improve
@@ -1097,8 +1080,9 @@ def CleanConfig(config): # pragma: no cover
         >>> print(galsim.config.CleanConfig(config_dict))
     """
     if isinstance(config, dict):
-        return { k : CleanConfig(config[k]) for k in config if k[0] != '_' }
+        return { k : CleanConfig(config[k], keep_current) for k in config
+                 if k[0] != '_' and (keep_current or k != 'current') }
     elif isinstance(config, list):
-        return [ CleanConfig(item) for item in config ]
+        return [ CleanConfig(item, keep_current) for item in config ]
     else:
         return config

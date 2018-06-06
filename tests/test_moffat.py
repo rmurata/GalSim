@@ -28,22 +28,6 @@ path, filename = os.path.split(__file__)
 imgdir = os.path.join(path, "SBProfile_comparison_images") # Directory containing the reference
                                                            # images.
 
-
-# These are the default GSParams used when unspecified.  We'll check that specifying
-# these explicitly produces the same results.
-default_params = galsim.GSParams(
-        minimum_fft_size = 128,
-        maximum_fft_size = 4096,
-        folding_threshold = 5.e-3,
-        maxk_threshold = 1.e-3,
-        kvalue_accuracy = 1.e-5,
-        xvalue_accuracy = 1.e-5,
-        shoot_accuracy = 1.e-5,
-        realspace_relerr = 1.e-4,
-        realspace_abserr = 1.e-6,
-        integration_relerr = 1.e-6,
-        integration_abserr = 1.e-8)
-
 @timer
 def test_moffat():
     """Test the generation of a specific Moffat profile against a known result.
@@ -111,11 +95,22 @@ def test_moffat():
         np.testing.assert_almost_equal(moffat.xValue(cen), moffat.max_sb)
 
     # Should raise an exception if >=2 radii are provided.
-    assert_raises(TypeError, galsim.Moffat, beta=1, scale_radius=3, half_light_radius=1, fwhm=2)
-    assert_raises(TypeError, galsim.Moffat, beta=1, half_light_radius=1, fwhm=2)
-    assert_raises(TypeError, galsim.Moffat, beta=1, scale_radius=3, fwhm=2)
-    assert_raises(TypeError, galsim.Moffat, beta=1, scale_radius=3, half_light_radius=1)
+    assert_raises(TypeError, galsim.Moffat, beta=3, scale_radius=3, half_light_radius=1, fwhm=2)
+    assert_raises(TypeError, galsim.Moffat, beta=3, half_light_radius=1, fwhm=2)
+    assert_raises(TypeError, galsim.Moffat, beta=3, scale_radius=3, fwhm=2)
+    assert_raises(TypeError, galsim.Moffat, beta=3, scale_radius=3, half_light_radius=1)
+    assert_raises(TypeError, galsim.Moffat, beta=3)
 
+    # beta <= 1.1 needs to be truncated.
+    assert_raises(ValueError, galsim.Moffat, beta=1.1, scale_radius=3)
+    assert_raises(ValueError, galsim.Moffat, beta=0.9, scale_radius=3)
+
+    # trunc must be > sqrt(2) * hlr
+    assert_raises(ValueError, galsim.Moffat, beta=3, half_light_radius=1, trunc=1.4)
+
+    # Other errors
+    assert_raises(TypeError, galsim.Moffat, scale_radius=3)
+    assert_raises(ValueError, galsim.Moffat, beta=3, scale_radius=3, trunc=-1)
 
 @timer
 def test_moffat_properties():

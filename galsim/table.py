@@ -26,6 +26,10 @@ import numbers
 
 from . import _galsim
 from .utilities import lazy_property
+from .position import PositionD
+from .bounds import BoundsD
+from .errors import GalSimRangeError, GalSimBoundsError, GalSimValueError
+from .errors import GalSimIncompatibleValuesError, convert_cpp_errors
 
 class LookupTable(object):
     """
@@ -84,28 +88,26 @@ class LookupTable(object):
                          that all inputs / outputs will still be f, it's just a question of how the
                          interpolation is done. [default: False]
     """
-    def __init__(self, x=None, f=None, interpolant=None, x_log=False, f_log=False):
+    def __init__(self, x, f, interpolant=None, x_log=False, f_log=False):
         self.x_log = x_log
         self.f_log = f_log
-
-        if x is None or f is None:
-            raise TypeError("x and f are required for LookupTable")
 
         # check for proper interpolant
         if interpolant is None:
             interpolant = 'spline'
         else:
-            if interpolant not in ['spline', 'linear', 'ceil', 'floor', 'nearest']:
-                raise ValueError("Unknown interpolant: %s" % interpolant)
+            if interpolant not in ('spline', 'linear', 'ceil', 'floor', 'nearest'):
+                raise GalSimValueError("Unknown interpolant", interpolant,
+                                       ('spline', 'linear', 'ceil', 'floor', 'nearest'))
         self.interpolant = interpolant
 
         # Sanity checks
         if len(x) != len(f):
-            raise ValueError("Input array lengths don't match")
+            raise GalSimIncompatibleValuesError("Input array lengths don't match", x=x, f=f)
         if interpolant == 'spline' and len(x) < 3:
-            raise ValueError("Input arrays too small to spline interpolate")
-        if interpolant in ['linear', 'ceil', 'floor', 'nearest'] and len(x) < 2:
-            raise ValueError("Input arrays too small to interpolate")
+            raise GalSimValueError("Input arrays too small to spline interpolate", x)
+        if interpolant in ('linear', 'ceil', 'floor', 'nearest') and len(x) < 2:
+            raise GalSimValueError("Input arrays too small to interpolate", x)
 
         # turn x and f into numpy arrays so that all subsequent math is possible (unlike for
         # lists, tuples).  Also make sure the dtype is float
@@ -118,11 +120,11 @@ class LookupTable(object):
         self._x_min = self.x[0]
         self._x_max = self.x[-1]
         if self._x_min == self._x_max:
-            raise ValueError("All x values are equal")
+            raise GalSimValueError("All x values are equal", x)
         if self.x_log and self.x[0] <= 0.:
-            raise ValueError("Cannot interpolate in log(x) when table contains x<=0!")
+            raise GalSimValueError("Cannot interpolate in log(x) when table contains x<=0.", x)
         if self.f_log and np.any(self.f <= 0.):
-            raise ValueError("Cannot interpolate in log(f) when table contains f<=0!")
+            raise GalSimValueError("Cannot interpolate in log(f) when table contains f<=0.", f)
 
     @lazy_property
     def _tab(self):
@@ -132,8 +134,9 @@ class LookupTable(object):
         if self.x_log: self._x = np.log(self._x)
         if self.f_log: self._f = np.log(self._f)
 
-        return _galsim._LookupTable(self._x.ctypes.data, self._f.ctypes.data,
-                                    len(self._x), self.interpolant)
+        with convert_cpp_errors():
+            return _galsim._LookupTable(self._x.ctypes.data, self._f.ctypes.data,
+                                        len(self._x), self.interpolant)
 
     @property
     def x_min(self): return self._x_min
@@ -164,8 +167,6 @@ class LookupTable(object):
 
         # Handle the log(x) if necessary
         if self.x_log:
-            if np.any(np.asarray(x) <= 0.):
-                raise ValueError("Cannot interpolate x<=0 when using log(x) interpolation.")
             x = np.log(x)
 
         x = np.asarray(x)
@@ -173,9 +174,7 @@ class LookupTable(object):
             f = self._tab.interp(float(x))
         else:
             dimen = len(x.shape)
-            if dimen > 2:
-                raise ValueError("Arrays with dimension larger than 2 not allowed!")
-            elif dimen == 2:
+            if dimen > 1:
                 f = np.empty_like(x.ravel(), dtype=float)
                 xx = x.astype(float,copy=False).ravel()
                 self._tab.interpMany(xx.ctypes.data, f.ctypes.data, len(xx))
@@ -193,11 +192,11 @@ class LookupTable(object):
     def _check_range(self, x):
         slop = (self.x_max - self.x_min) * 1.e-6
         if np.min(x) < self.x_min - slop:
-            raise ValueError("x value(s) below the range of the LookupTable: %s < %s"%(
-                             x, self.x_min))
+            raise GalSimRangeError("x value(s) below the range of the LookupTable.",
+                                   x, self.x_min, self.x_max)
         if np.max(x) > self.x_max + slop:
-            raise ValueError("x value(s) above the range of the LookupTable: %s > %s"%(
-                             x, self.x_max))
+            raise GalSimRangeError("x value(s) above the range of the LookupTable.",
+                                   x, self.x_min, self.x_max)
 
     def getArgs(self):
         return self.x
@@ -271,15 +270,16 @@ class LookupTable(object):
             try:
                 # version >= 0.20
                 from pandas.io.common import CParserError
-            except ImportError: # pragma: no cover
+            except ImportError:
                 # version < 0.20
                 from pandas.parser import CParserError
             data = pandas.read_csv(file_name, comment='#', delim_whitespace=True, header=None)
             data = data.values.transpose()
         except (ImportError, AttributeError, CParserError): # pragma: no cover
             data = np.loadtxt(file_name).transpose()
-        if data.shape[0] != 2:
-            raise ValueError("File %s provided for LookupTable does not have 2 columns"%file_name)
+        if data.shape[0] != 2:  # pragma: no cover
+            raise GalSimValueError("File provided for LookupTable does not have 2 columns",
+                                   file_name)
         x=data[0]
         f=data[1]
         if amplitude != 1.0:
@@ -415,8 +415,8 @@ class LookupTable2D(object):
                           `edge_mode='constant'`.  [default: 0]
     """
     def __init__(self, x, y, f, interpolant='linear', edge_mode='raise', constant=0):
-        if edge_mode not in ['raise', 'wrap', 'constant']:
-            raise ValueError("Unknown edge_mode: {:0}".format(edge_mode))
+        if edge_mode not in ('raise', 'wrap', 'constant'):
+            raise GalSimValueError("Unknown edge_mode.", edge_mode, ('raise', 'wrap', 'constant'))
 
         self.x = np.ascontiguousarray(x, dtype=float)
         self.y = np.ascontiguousarray(y, dtype=float)
@@ -425,15 +425,19 @@ class LookupTable2D(object):
         dx = np.diff(self.x)
         dy = np.diff(self.y)
 
-        if not (all(dx > 0) and all(dy > 0)):
-            raise ValueError("x and y input grids are not strictly increasing.")
+        if not all(dx > 0):
+            raise GalSimValueError("x input grids is not strictly increasing.", x)
+        if not all(dy > 0):
+            raise GalSimValueError("y input grids is not strictly increasing.", y)
 
         fshape = self.f.shape
         if fshape != (len(x), len(y)):
-            raise ValueError("Shape of `f` must be (len(`x`), len(`y`)).")
+            raise GalSimIncompatibleValuesError(
+                "Shape of f incompatible with lengths of x,y", f=f, x=x, y=y)
 
-        if interpolant not in ['linear', 'ceil', 'floor', 'nearest']:
-            raise ValueError("Unknown interpolant: %s" % interpolant)
+        if interpolant not in ('linear', 'ceil', 'floor', 'nearest'):
+            raise GalSimValueError("Unknown interpolant.", interpolant,
+                                   ('linear', 'ceil', 'floor', 'nearest'))
         self.interpolant = interpolant
 
 
@@ -452,14 +456,17 @@ class LookupTable2D(object):
                 self.xperiod = self.x[-1] - self.x[0]
                 self.yperiod = self.y[-1] - self.y[0]
             else:
-                raise ValueError("Cannot use edge_mode='wrap' unless either x and y are equally "
-                                 "spaced or first/last row/column of f are identical.")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot use edge_mode='wrap' unless either x and y are equally "
+                    "spaced or first/last row/column of f are identical.",
+                    edge_mode=edge_mode, x=x, y=y, f=f)
 
     @lazy_property
     def _tab(self):
-        return _galsim._LookupTable2D(self.x.ctypes.data, self.y.ctypes.data,
-                                      self.f.ctypes.data, len(self.x), len(self.y),
-                                      self.interpolant)
+        with convert_cpp_errors():
+            return _galsim._LookupTable2D(self.x.ctypes.data, self.y.ctypes.data,
+                                          self.f.ctypes.data, len(self.x), len(self.y),
+                                          self.interpolant)
     def getXArgs(self):
         return self.x
 
@@ -480,9 +487,14 @@ class LookupTable2D(object):
         return ((x-self.x[0]) % self.xperiod + self.x[0],
                 (y-self.y[0]) % self.yperiod + self.y[0])
 
+    @property
+    def _bounds(self):
+        return BoundsD(self.x[0], self.x[-1], self.y[0], self.y[-1])
+
     def _call_raise(self, x, y):
         if not self._inbounds(x, y):
-            raise ValueError("Extrapolating beyond input range.")
+            raise GalSimBoundsError("Extrapolating beyond input range.",
+                                    PositionD(x,y), self._bounds)
 
         if isinstance(x, numbers.Real):
             return self._tab.interp(x, y)
@@ -528,7 +540,8 @@ class LookupTable2D(object):
 
     def _gradient_raise(self, x, y):
         if not self._inbounds(x, y):
-            raise ValueError("Extrapolating beyond input range.")
+            raise GalSimBoundsError("Extrapolating beyond input range.",
+                                    PositionD(x,y), self._bounds)
 
         if isinstance(x, numbers.Real):
             grad = np.empty(2, dtype=float)

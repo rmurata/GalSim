@@ -58,6 +58,8 @@ import math
 from . import _galsim
 from .position import PositionD, PositionI
 from .utilities import lazy_property, parse_pos_args
+from .errors import GalSimError, GalSimRangeError, GalSimValueError, GalSimIncompatibleValuesError
+from .errors import GalSimFFTSizeError, GalSimNotImplementedError, convert_cpp_errors, galsim_warn
 
 
 class GSObject(object):
@@ -188,19 +190,20 @@ class GSObject(object):
         >>> gal = galsim.Sersic(n=4, half_light_radius=4.3)
         >>> psf = galsim.Moffat(beta=3, fwhm=2.85)
         >>> conv = galsim.Convolve([gal,psf])
-        >>> im = galsim.Image(1000,1000, scale=0.05)        # Note the very small pixel scale!
+        >>> im = galsim.Image(1000,1000, scale=0.02)        # Note the very small pixel scale!
         >>> im = conv.drawImage(image=im)                   # This uses the default GSParams.
         Traceback (most recent call last):
           File "<stdin>", line 1, in <module>
-          File "galsim/gsobject.py", line 1615, in drawImage
+          File "galsim/gsobject.py", line 1666, in drawImage
             added_photons = prof.drawFFT(draw_image, add)
-          File "galsim/gsobject.py", line 1827, in drawFFT
+          File "galsim/gsobject.py", line 1877, in drawFFT
             kimage, wrap_size = self.drawFFT_makeKImage(image)
-          File "galsim/gsobject.py", line 1753, in drawFFT_makeKImage
-            "If you can handle the large FFT, you may update gsparams.maximum_fft_size.")
-        RuntimeError: drawFFT requires an FFT that is too large: 6144.
+          File "galsim/gsobject.py", line 1802, in drawFFT_makeKImage
+            raise GalSimFFTSizeError("drawFFT requires an FFT that is too large.", Nk)
+        galsim.errors.GalSimFFTSizeError: drawFFT requires an FFT that is too large.
+        The required FFT size would be 12288 x 12288, which requires 3.38 GB of memory.
         If you can handle the large FFT, you may update gsparams.maximum_fft_size.
-        >>> big_fft_params = galsim.GSParams(maximum_fft_size=10240)
+        >>> big_fft_params = galsim.GSParams(maximum_fft_size=12300)
         >>> conv = galsim.Convolve([gal,psf],gsparams=big_fft_params)
         >>> im = conv.drawImage(image=im)                   # Now it works (but is slow!)
         >>> im.write('high_res_sersic.fits')
@@ -602,8 +605,8 @@ class GSObject(object):
 
         @returns an estimate of the radius in physical units (or both estimates if rtype == 'both')
         """
-        if rtype not in ['trace', 'det', 'both']:
-            raise ValueError("rtype must be one of 'trace', 'det', or 'both'")
+        if rtype not in ('trace', 'det', 'both'):
+            raise GalSimValueError("Invalid rtype.", rtype, ('trace', 'det', 'both'))
 
         if hasattr(self, 'sigma'):
             if rtype == 'both':
@@ -683,7 +686,7 @@ class GSObject(object):
 
         Not all GSObject classes can use this method.  Classes like Convolution that require a
         Discrete Fourier Transform to determine the real space values will not do so for a single
-        position.  Instead a RuntimeError will be raised.  The xValue() method is available if and
+        position.  Instead a GalSimError will be raised.  The xValue() method is available if and
         only if `obj.is_analytic_x == True`.
 
         Users who wish to use the xValue() method for an object that is the convolution of other
@@ -725,7 +728,7 @@ class GSObject(object):
         kpos = parse_pos_args(args,kwargs,'kx','ky')
         return self._kValue(kpos)
 
-    def _kValue(self, kpos):
+    def _kValue(self, kpos):  # pragma: no cover  (all our classes override this)
         """Equivalent to kValue(kpos), but kpos must be a galsim.PositionD instance.
         """
         raise NotImplementedError("%s does not implement kValue"%self.__class__.__name__)
@@ -871,6 +874,8 @@ class GSObject(object):
             shear = args[0]
         elif len(args) > 1:
             raise TypeError("Error, too many unnamed arguments to GSObject.shear!")
+        elif len(kwargs) == 0:
+            raise TypeError("Error, shear argument is required")
         else:
             shear = Shear(**kwargs)
         return Transform(self, jac=shear.getMatrix().ravel().tolist())
@@ -1013,25 +1018,34 @@ class GSObject(object):
         # Check validity of nx,ny,bounds:
         if image is not None:
             if bounds is not None:
-                raise ValueError("Cannot provide bounds if image is provided")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide bounds if image is provided", bounds=bounds, image=image)
             if nx is not None or ny is not None:
-                raise ValueError("Cannot provide nx,ny if image is provided")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide nx,ny if image is provided", nx=nx, ny=ny, image=image)
             if dtype is not None and image.array.dtype != dtype:
-                raise ValueError("Cannot specify dtype != image.array.dtype if image is provided")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot specify dtype != image.array.dtype if image is provided",
+                    dtype=dtype, image=image)
 
         # Make image if necessary
         if image is None:
             # Can't add to image if none is provided.
             if add_to_image:
-                raise ValueError("Cannot add_to_image if image is None")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot add_to_image if image is None", add_to_image=add_to_image, image=image)
             # Use bounds or nx,ny if provided
             if bounds is not None:
                 if nx is not None or ny is not None:
-                    raise ValueError("Cannot set both bounds and (nx, ny)")
+                    raise GalSimIncompatibleValuesError(
+                        "Cannot set both bounds and (nx, ny)", nx=nx, ny=ny, bounds=bounds)
+                if not bounds.isDefined():
+                    raise GalSimValueError("Cannot use undefined bounds", bounds)
                 image = Image(bounds=bounds, dtype=dtype)
             elif nx is not None or ny is not None:
                 if nx is None or ny is None:
-                    raise ValueError("Must set either both or neither of nx, ny")
+                    raise GalSimIncompatibleValuesError(
+                        "Must set either both or neither of nx, ny", nx=nx, ny=ny)
                 image = Image(nx, ny, dtype=dtype)
             else:
                 N = self.getGoodImageSize(1.0)
@@ -1042,7 +1056,9 @@ class GSObject(object):
         elif not image.bounds.isDefined():
             # Can't add to image if need to resize
             if add_to_image:
-                raise ValueError("Cannot add_to_image if image bounds are not defined")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot add_to_image if image bounds are not defined",
+                    add_to_image=add_to_image, image=image)
             N = self.getGoodImageSize(1.0)
             if odd: N += 1
             bounds = _BoundsI(1,N,1,N)
@@ -1062,7 +1078,9 @@ class GSObject(object):
         else:
             bounds = image.bounds
         if not bounds.isDefined():
-            raise ValueError("Cannot provide non-local wcs with automatically sized image")
+            raise GalSimIncompatibleValuesError(
+                "Cannot provide non-local wcs with automatically sized image",
+                wcs=wcs, image=image, bounds=new_bounds)
         elif use_true_center:
             obj_cen = bounds.true_center
         else:
@@ -1114,7 +1132,8 @@ class GSObject(object):
         # Determine the correct wcs given the input scale, wcs and image.
         if wcs is not None:
             if scale is not None:
-                raise ValueError("Cannot provide both wcs and scale")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide both wcs and scale", wcs=wcs, scale=scale)
             if not isinstance(wcs, BaseWCS):
                 raise TypeError("wcs must be a BaseWCS instance")
             if image is not None: image.wcs = None
@@ -1485,24 +1504,24 @@ class GSObject(object):
 
         # Check that image is sane
         if image is not None and not isinstance(image, Image):
-            raise ValueError("image is not an Image instance")
+            raise TypeError("image is not an Image instance", image)
 
         # Make sure (gain, area, exptime) have valid values:
         if gain <= 0.:
-            raise ValueError("Invalid gain <= 0.")
+            raise GalSimRangeError("Invalid gain <= 0.", gain, 0., None)
         if area <= 0.:
-            raise ValueError("Invalid area <= 0.")
+            raise GalSimRangeError("Invalid area <= 0.", area, 0., None)
         if exptime <= 0.:
-            raise ValueError("Invalid exptime <= 0.")
+            raise GalSimRangeError("Invalid exptime <= 0.", exptime, 0., None)
 
-        if method not in ['auto', 'fft', 'real_space', 'phot', 'no_pixel', 'sb']:
-            raise ValueError("Invalid method name = %s"%method)
+        if method not in ('auto', 'fft', 'real_space', 'phot', 'no_pixel', 'sb'):
+            raise GalSimValueError("Invalid method name", method,
+                                   ('auto', 'fft', 'real_space', 'phot', 'no_pixel', 'sb'))
 
         # Check that the user isn't convolving by a Pixel already.  This is almost always an error.
         if method == 'auto' and isinstance(self, Convolution):
             if any([ isinstance(obj, Pixel) for obj in self.obj_list ]):
-                import warnings
-                warnings.warn(
+                galsim_warn(
                     "You called drawImage with `method='auto'` "
                     "for an object that includes convolution by a Pixel.  "
                     "This is probably an error.  Normally, you should let GalSim "
@@ -1514,21 +1533,34 @@ class GSObject(object):
         # Some parameters are only relevant for method == 'phot'
         if method != 'phot' and sensor is None:
             if n_photons != 0.:
-                raise ValueError("n_photons is only relevant for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "n_photons is only relevant for method='phot'",
+                    method=method, sensor=sensor, n_photons=n_photons)
             if rng is not None:
-                raise ValueError("rng is only relevant for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "rng is only relevant for method='phot'",
+                    method=method, sensor=sensor, rng=rng)
             if max_extra_noise != 0.:
-                raise ValueError("max_extra_noise is only relevant for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "max_extra_noise is only relevant for method='phot'",
+                    method=method, sensor=sensor, max_extra_noise=max_extra_noise)
             if poisson_flux is not None:
-                raise ValueError("poisson_flux is only relevant for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "poisson_flux is only relevant for method='phot'",
+                    method=method, sensor=sensor, poisson_flux=poisson_flux)
             if surface_ops != ():
-                raise ValueError("surface_ops are only relevant for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "surface_ops are only relevant for method='phot'",
+                    method=method, sensor=sensor, surface_ops=surface_ops)
             if save_photons:
-                raise ValueError("save_photons is only valid for method='phot'")
+                raise GalSimIncompatibleValuesError(
+                    "save_photons is only valid for method='phot'",
+                    method=method, sensor=sensor, save_photons=save_photons)
         else:
             # If we want to save photons, it doesn't make sense to limit the number per shoot call.
             if save_photons and maxN is not None:
-                raise ValueError("Setting maxN is incompatible with save_photons=True")
+                raise GalSimIncompatibleValuesError(
+                    "Setting maxN is incompatible with save_photons=True")
 
         # Do any delayed computation needed by fft or real_space drawing.
         if method != 'phot':
@@ -1568,7 +1600,7 @@ class GSObject(object):
         prof *= flux_scale
 
         # If necessary, convolve by the pixel
-        if method in ['auto', 'fft', 'real_space']:
+        if method in ('auto', 'fft', 'real_space'):
             if method == 'auto':
                 real_space = None
             elif method == 'fft':
@@ -1600,13 +1632,13 @@ class GSObject(object):
         else:
             # If not using phot, but doing sensor, then make a copy.
             if sensor is not None:
-                if imview.dtype in [np.float32, np.float64]:
+                if imview.dtype in (np.float32, np.float64):
                     dtype = None
                 else:
                     dtype = np.float64
                 draw_image = imview.real.subsample(n_subsample, n_subsample, dtype=dtype)
                 draw_image.setCenter(0,0)
-                if method in ['auto', 'fft', 'real_space']:
+                if method in ('auto', 'fft', 'real_space'):
                     # Need to reconvolve by the new smaller pixel instead
                     prof = Convolve(
                             prof_no_pixel,
@@ -1636,7 +1668,7 @@ class GSObject(object):
                 photons = PhotonArray.makeFromImage(draw_image, rng=ud)
                 for op in surface_ops:
                     op.applyTo(photons, local_wcs)
-                if imview.dtype in [np.float32, np.float64]:
+                if imview.dtype in (np.float32, np.float64):
                     added_photons = sensor.accumulate(photons, imview, orig_center)
                 else:
                     # Need a temporary
@@ -1676,14 +1708,14 @@ class GSObject(object):
         """
         from .image import ImageD, ImageF
         if image.wcs is None or not image.wcs.isPixelScale():
-            raise ValueError("drawReal requires an image with a PixelScale wcs")
+            raise GalSimValueError("drawReal requires an image with a PixelScale wcs", image)
 
-        if image.dtype in [ np.float64, np.float32 ] and not add_to_image and image.iscontiguous:
+        if image.dtype in (np.float64, np.float32) and not add_to_image and image.iscontiguous:
             self._drawReal(image)
             return image.array.sum(dtype=float)
         else:
             # Need a temporary
-            if image.dtype in [ np.complex128, np.int32, np.uint32 ]:
+            if image.dtype in (np.complex128, np.int32, np.uint32):
                 im1 = ImageD(bounds=image.bounds, scale=image.scale)
             else:
                 im1 = ImageF(bounds=image.bounds, scale=image.scale)
@@ -1765,12 +1797,10 @@ class GSObject(object):
             Nk = int(np.ceil(maxk/dk)) * 2
 
         if Nk > self.gsparams.maximum_fft_size:
-            raise RuntimeError(
-                "drawFFT requires an FFT that is too large: %s. "%Nk +
-                "If you can handle the large FFT, you may update gsparams.maximum_fft_size.")
+            raise GalSimFFTSizeError("drawFFT requires an FFT that is too large.", Nk)
 
         bounds = _BoundsI(0,Nk//2,-Nk//2,Nk//2)
-        if image.dtype in [ np.complex128, np.float64, np.int32, np.uint32 ]:
+        if image.dtype in (np.complex128, np.float64, np.int32, np.uint32):
             kimage = ImageCD(bounds=bounds, scale=dk)
         else:
             kimage = ImageCF(bounds=bounds, scale=dk)
@@ -1803,7 +1833,8 @@ class GSObject(object):
         # Perform the fourier transform.
         breal = _BoundsI(-wrap_size//2, wrap_size//2+1, -wrap_size//2, wrap_size//2-1)
         real_image = Image(breal, dtype=float)
-        _galsim.irfft(kimage_wrap._image, real_image._image, True, True)
+        with convert_cpp_errors():
+            _galsim.irfft(kimage_wrap._image, real_image._image, True, True)
 
         # Add (a portion of) this to the original image.
         temp = real_image.subImage(image.bounds)
@@ -1839,7 +1870,7 @@ class GSObject(object):
         @returns The total flux drawn inside the image bounds.
         """
         if image.wcs is None or not image.wcs.isPixelScale():
-            raise ValueError("drawPhot requires an image with a PixelScale wcs")
+            raise GalSimValueError("drawPhot requires an image with a PixelScale wcs", image)
 
         kimage, wrap_size = self.drawFFT_makeKImage(image)
         self._drawKImage(kimage)
@@ -1952,15 +1983,12 @@ class GSObject(object):
         # Make n_photons an integer.
         iN = int(n_photons + 0.5)
 
-        if iN <= 0:  # pragma: no cover
-            import warnings
-            warnings.warn("Automatic n_photons calculation did not end up with positive N. " +
-                          "(n_photons = %s)  No photons will be shot. "%n_photons +
-                          "prof = %s  "%self +
-                          "flux = %s  "%self.flux +
-                          "poisson_flux = %s  "%poisson_flux +
-                          "max_extra_noise = %s  "%max_extra_noise +
-                          "g = %s  "%g)
+        if iN <= 0:
+            galsim_warn("Automatic n_photons calculation did not end up with positive N. "
+                        "(n_photons = {0})  No photons will be shot.\n"
+                        "  prof = {1}\n  flux = {2}\n  poisson_flux = {3}\n"
+                        "  max_extra_noise = {4}\n  g = {5}".format(
+                                n_photons, self, self.flux, poisson_flux, max_extra_noise, g))
             return 0, 1.
 
         return iN, g
@@ -2040,7 +2068,7 @@ class GSObject(object):
         from .image import ImageD
         # Make sure the type of n_photons is correct and has a valid value:
         if n_photons < 0.:
-            raise ValueError("Invalid n_photons < 0.")
+            raise GalSimRangeError("Invalid n_photons < 0.", n_photons, 0., None)
 
         if poisson_flux is None:
             if n_photons == 0.: poisson_flux = True
@@ -2048,8 +2076,7 @@ class GSObject(object):
 
         # Check that either n_photons is set to something or flux is set to something
         if n_photons == 0. and self.flux == 1.:
-            import warnings
-            warnings.warn(
+            galsim_warn(
                     "Warning: drawImage for object with flux == 1, area == 1, and "
                     "exptime == 1, but n_photons == 0.  This will only shoot a single photon.")
 
@@ -2057,7 +2084,7 @@ class GSObject(object):
 
         # Make sure the image is set up to have unit pixel scale and centered at 0,0.
         if image.wcs is None or not image.wcs.isPixelScale():
-            raise ValueError("drawPhot requires an image with a PixelScale wcs")
+            raise GalSimValueError("drawPhot requires an image with a PixelScale wcs", image)
 
         if sensor is None:
             sensor = Sensor()
@@ -2087,14 +2114,11 @@ class GSObject(object):
 
             try:
                 photons = self.shoot(thisN, ud)
-            except RuntimeError:  # pragma: no cover
-                # Give some extra explanation as a warning, then raise the original exception
-                # so the traceback shows as much detail as possible.
-                import warnings
-                warnings.warn(
-                    "Unable to draw this GSObject with photon shooting.  Perhaps it is a "+
-                    "Deconvolve or is a compound including one or more Deconvolve objects.")
-                raise
+            except (GalSimError, NotImplementedError) as e:
+                raise GalSimNotImplementedError(
+                        "Unable to draw this GSObject with photon shooting.  Perhaps it "
+                        "is a Deconvolve or is a compound including one or more "
+                        "Deconvolve objects.\nOriginal error: %r"%(e))
 
             if g != 1. or thisN != Ntot:
                 photons.scaleFlux(g * thisN / Ntot)
@@ -2105,7 +2129,7 @@ class GSObject(object):
             for op in surface_ops:
                 op.applyTo(photons, local_wcs)
 
-            if image.dtype in [np.float32, np.float64]:
+            if image.dtype in (np.float32, np.float64):
                 added_flux += sensor.accumulate(photons, image, orig_center, resume=resume)
                 resume = True  # Resume from this point if there are any further iterations.
             else:
@@ -2194,8 +2218,12 @@ class GSObject(object):
         from .wcs import PixelScale
         from .image import Image
         # Make sure provided image is complex
-        if image is not None and not image.iscomplex:
-            raise ValueError("Provided image must be complex")
+        if image is not None:
+            if not isinstance(image, Image):
+                raise TypeError("Provided image must be galsim.Image", image)
+
+            if not image.iscomplex:
+                raise GalSimValueError("Provided image must be complex", image)
 
         # Possibly get the scale from image.
         if image is not None and scale is None:
@@ -2225,10 +2253,20 @@ class GSObject(object):
             real_prof = PixelScale(dx).toImage(self)
             dtype = np.complex128 if image is None else image.dtype
             image = real_prof._setup_image(image, nx, ny, bounds, add_to_image, dtype, odd=True)
+        else:
+            # Do some checks that setup_image would have done for us
+            if bounds is not None:
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide bounds if image is provided", bounds=bounds, image=image)
+            if nx is not None or ny is not None:
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide nx,ny if image is provided", nx=nx, ny=ny, image=image)
 
         # Can't both recenter a provided image and add to it.
         if recenter and image.center != PositionI(0,0) and add_to_image:
-            raise ValueError("Cannot recenter a non-centered image when add_to_image=True")
+            raise GalSimIncompatibleValuesError(
+                "Cannot use add_to_image=True unless image is centered at (0,0) or recenter=False",
+                recenter=recenter, image=image, add_to_image=add_to_image)
 
         # Set the center to 0,0 if appropriate
         if recenter and image.center != PositionI(0,0):
@@ -2248,7 +2286,7 @@ class GSObject(object):
             image += im2
         return image
 
-    def _drawKImage(self, image):
+    def _drawKImage(self, image):  # pragma: no cover  (all our classes override this)
         """Equivalent to drawKImage(image, add_to_image, recenter=False, add_to_image=False), but
         without the normal sanity checks or the option to create the image automatically.
 

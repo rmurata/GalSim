@@ -36,6 +36,7 @@ from .position import PositionI, PositionD
 from .table import LookupTable
 from .random import UniformDeviate
 from . import meta_data
+from .errors import GalSimUndefinedBoundsError, convert_cpp_errors
 
 class Sensor(object):
     """
@@ -67,6 +68,8 @@ class Sensor(object):
 
         @returns the total flux that fell onto the image.
         """
+        if not image.bounds.isDefined():
+            raise GalSimUndefinedBoundsError("Calling accumulate on image with undefined bounds")
         return photons.addTo(image)
 
     def __repr__(self):
@@ -166,11 +169,11 @@ class SiliconSensor(Sensor):
         if not os.path.isfile(self.config_file):
             cfg_file = os.path.join(meta_data.share_dir, 'sensors', self.config_file)
             if not os.path.isfile(cfg_file):
-                raise IOError("Cannot locate file %s or %s"%(self.config_file, cfg_file))
+                raise OSError("Cannot locate file %s or %s"%(self.config_file, cfg_file))
             self.config_file = cfg_file
             self.vertex_file = os.path.join(meta_data.share_dir, 'sensors', self.vertex_file)
-        if not os.path.isfile(self.vertex_file):
-            raise IOError("Cannot locate vertex file %s"%(self.vertex_file))
+        if not os.path.isfile(self.vertex_file):  # pragma: no cover
+            raise OSError("Cannot locate vertex file %s"%(self.vertex_file))
 
         self.config = self._read_config_file(self.config_file)
 
@@ -180,9 +183,9 @@ class SiliconSensor(Sensor):
             # A bit kludgy, but it works
             self.treering_func = LookupTable(x=[0.0,1.0], f=[0.0,0.0], interpolant='linear')
         elif not isinstance(treering_func, LookupTable):
-            raise ValueError("treering_func must be a galsim.LookupTable")
+            raise TypeError("treering_func must be a galsim.LookupTable")
         if not isinstance(treering_center, PositionD):
-            raise ValueError("treering_center must be a galsim.PositionD")
+            raise TypeError("treering_center must be a galsim.PositionD")
 
         # Now we read in the absorption length table:
         abs_file = os.path.join(meta_data.share_dir, 'sensors', 'abs_length.dat')
@@ -202,15 +205,16 @@ class SiliconSensor(Sensor):
         nrecalc = float(self.nrecalc) / self.strength
         vertex_data = np.loadtxt(self.vertex_file, skiprows = 1)
 
-        if vertex_data.shape != (Nx * Ny * (4 * NumVertices + 4), 5):
-            raise IOError("Vertex file %s does not match config file %s"%(
+        if vertex_data.shape != (Nx * Ny * (4 * NumVertices + 4), 5):  # pragma: no cover
+            raise OSError("Vertex file %s does not match config file %s"%(
                           self.vertex_file, self.config_file))
 
-        self._silicon = _galsim.Silicon(NumVertices, num_elec, Nx, Ny, self.qdist, nrecalc,
-                                        diff_step, PixelSize, SensorThickness,
-                                        vertex_data.ctypes.data,
-                                        self.treering_func._tab, self.treering_center._p,
-                                        self.abs_length_table._tab, self.transpose)
+        with convert_cpp_errors():
+            self._silicon = _galsim.Silicon(NumVertices, num_elec, Nx, Ny, self.qdist, nrecalc,
+                                            diff_step, PixelSize, SensorThickness,
+                                            vertex_data.ctypes.data,
+                                            self.treering_func._tab, self.treering_center._p,
+                                            self.abs_length_table._tab, self.transpose)
 
     def __str__(self):
         s = 'galsim.SiliconSensor(%r'%self.name
@@ -275,6 +279,8 @@ class SiliconSensor(Sensor):
                 raise RuntimeError("accumulate called with resume, but provided image does "
                                    "not match one used in the previous accumulate call.")
         self._last_image = image
+        if not image.bounds.isDefined():
+            raise GalSimUndefinedBoundsError("Calling accumulate on image with undefined bounds")
         return self._silicon.accumulate(photons._pa, self.rng._rng, image._image, orig_center._p,
                                         resume)
 
@@ -311,8 +317,8 @@ class SiliconSensor(Sensor):
             lines=file.readlines()
         lines = [ l.strip() for l in lines ]
         lines = [ l.split() for l in lines if len(l) > 0 and l[0] != '#' ]
-        if any([l[1] != '=' for l in lines]):
-            raise IOError("Error reading config file %s"%filename)
+        if any([l[1] != '=' for l in lines]):  # pragma: no cover
+            raise OSError("Error reading config file %s"%filename)
         config = dict([(l[0], l[2]) for l in lines])
         # convert strings to int or float values when appropriate
         for k in config:

@@ -21,9 +21,12 @@ Also includes classes that modify PhotonArray objects in a number of ways.
 """
 
 import numpy as np
+
 from . import _galsim
 from .random import UniformDeviate
 from .angle import radians, arcsec
+from .errors import GalSimError, GalSimRangeError, GalSimValueError, GalSimUndefinedBoundsError
+from .errors import GalSimIncompatibleValuesError, convert_cpp_errors
 
 # Add on more methods in the python layer
 
@@ -188,13 +191,14 @@ class PhotonArray(object):
         self._flux *= scale
 
     def scaleXY(self, scale):
-        self._x *= scale
-        self._y *= scale
+        self._x *= float(scale)
+        self._y *= float(scale)
 
     def assignAt(self, istart, rhs):
         "Assign the contents of another PhotonArray to this one starting at istart."
         if istart + rhs.size() > self.size():
-            raise IndexError("The given rhs does not fit into this array starting at %d"%istart)
+            raise GalSimValueError(
+                "The given rhs does not fit into this array starting at %d"%istart, rhs)
         s = slice(istart, istart + rhs.size())
         self.x[s] = rhs.x
         self.y[s] = rhs.y
@@ -207,6 +211,9 @@ class PhotonArray(object):
 
     def convolve(self, rhs, rng=None):
         "Convolve this PhotonArray with another."
+        if rhs.size() != self.size():
+            raise GalSimIncompatibleValuesError("PhotonArray.convolve with unequal size arrays",
+                                                self_pa=self, rhs=rhs)
         ud = UniformDeviate(rng)
         self._pa.convolve(rhs._pa, ud._rng)
 
@@ -258,8 +265,9 @@ class PhotonArray(object):
         if self.hasAllocatedWavelengths():
             assert(self._wave.strides[0] == self._wave.itemsize)
             _wave = self._wave.ctypes.data
-        return _galsim.PhotonArray(int(self.size()), _x, _y, _flux, _dxdz, _dydz, _wave,
-                                   self._is_corr)
+        with convert_cpp_errors():
+            return _galsim.PhotonArray(int(self.size()), _x, _y, _flux, _dxdz, _dydz, _wave,
+                                       self._is_corr)
 
     def addTo(self, image):
         """Add flux of photons to an image by binning into pixels.
@@ -273,6 +281,9 @@ class PhotonArray(object):
 
         @returns the total flux of photons the landed inside the image bounds.
         """
+        if not image.bounds.isDefined():
+            raise GalSimUndefinedBoundsError(
+                "Attempting to PhotonArray::addTo an Image with undefined Bounds")
         return self._pa.addTo(image._image)
 
     @classmethod
@@ -296,7 +307,7 @@ class PhotonArray(object):
         ud = UniformDeviate(rng)
         max_flux = float(max_flux)
         if (max_flux <= 0):
-            raise ValueError("max_flux must be positive")
+            raise GalSimRangeError("max_flux must be positive", max_flux, 0.)
         total_flux = image.array.sum(dtype=float)
 
         # This goes a bit over what we actually need, but not by much.  Worth it to not have to
@@ -309,7 +320,7 @@ class PhotonArray(object):
         photons._y = photons.y[:N]
         photons._flux = photons.flux[:N]
 
-        if image.scale != 1.:
+        if image.scale != 1. and image.scale is not None:
             photons.scaleXY(image.scale)
         return photons
 
@@ -363,14 +374,11 @@ class PhotonArray(object):
 
         @param file_name    The file name of the input FITS file.
         """
-        from ._pyfits import pyfits, pyfits_version
+        from ._pyfits import pyfits
         with pyfits.open(file_name) as fits:
             data = fits[1].data
         N = len(data)
-        if pyfits_version > '3.0':
-            names = data.columns.names
-        else: # pragma: no cover
-            names = data.dtype.names
+        names = data.columns.names
 
         photons = cls(N, x=data['x'], y=data['y'], flux=data['flux'])
         if 'dxdz' in names:
@@ -422,9 +430,9 @@ class FRatioAngles(object):
     def __init__(self, fratio, obscuration=0.0, rng=None):
 
         if fratio < 0:
-            raise ValueError("The f-ratio must be positive.")
+            raise GalSimRangeError("The f-ratio must be positive.", fratio, 0.)
         if obscuration < 0 or obscuration >= 1:
-            raise ValueError("The obscuration fraction must be between 0 and 1.")
+            raise GalSimRangeError("Invalid obscuration.", obscuration, 0., 1.)
         ud = UniformDeviate(rng)
 
         self.fratio = fratio
@@ -537,7 +545,7 @@ class PhotonDCR(object):
         # Any remaining kwargs will get forwarded to galsim.dcr.get_refraction
         # Check that they're valid
         for kw in self.kw:
-            if kw not in ['temperature', 'pressure', 'H2O_pressure']:
+            if kw not in ('temperature', 'pressure', 'H2O_pressure'):
                 raise TypeError("Got unexpected keyword: {0}".format(kw))
 
         self.base_refraction = dcr.get_refraction(self.base_wavelength, self.zenith_angle,
@@ -548,7 +556,7 @@ class PhotonDCR(object):
         """
         from . import dcr
         if not photon_array.hasAllocatedWavelengths():
-            raise RuntimeError("PhotonDCR requires that wavelengths be set")
+            raise GalSimError("PhotonDCR requires that wavelengths be set")
 
         w = photon_array.wavelength
         cenx = local_wcs.origin.x

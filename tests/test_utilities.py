@@ -71,17 +71,25 @@ def test_pos():
     assert isinstance(pd5.x, float)
     assert isinstance(pd5.y, float)
 
+    assert_raises(TypeError, galsim.PositionI, 11)
     assert_raises(TypeError, galsim.PositionI, 11, 23, 9)
     assert_raises(TypeError, galsim.PositionI, x=11, z=23)
     assert_raises(TypeError, galsim.PositionI, x=11)
-    assert_raises(TypeError, galsim.PositionI, 11)
-    assert_raises(ValueError, galsim.PositionI, 11, 23.5)
+    assert_raises(TypeError, galsim.PositionD, x=11, y=23, z=17)
+    assert_raises(TypeError, galsim.PositionI, 11, 23, x=13, z=21)
+    assert_raises(TypeError, galsim.PositionI, 11, 23.5)
 
+    assert_raises(TypeError, galsim.PositionD, 11)
     assert_raises(TypeError, galsim.PositionD, 11, 23, 9)
     assert_raises(TypeError, galsim.PositionD, x=11, z=23)
     assert_raises(TypeError, galsim.PositionD, x=11)
-    assert_raises(TypeError, galsim.PositionD, 11)
+    assert_raises(TypeError, galsim.PositionD, x=11, y=23, z=17)
+    assert_raises(TypeError, galsim.PositionD, 11, 23, x=13, z=21)
     assert_raises(ValueError, galsim.PositionD, 11, "blue")
+
+    # Can't use base class directly.
+    assert_raises(TypeError, galsim.Position, 11, 23)
+    assert_raises(NotImplementedError, galsim.Position)
 
     # Check arithmetic
     for p1 in [pi1, pd1]:
@@ -125,12 +133,17 @@ def test_pos():
     assert pd9 == 0*pd1
     assert isinstance(pd9, galsim.PositionD)
 
-    assert_raises(ValueError, pd1.__mul__, "11")
-    assert_raises(ValueError, pd1.__mul__, None)
-    assert_raises(ValueError, pd1.__div__, "11e")
-    assert_raises(ValueError, pi1.__mul__, "11e")
-    assert_raises(ValueError, pi1.__mul__, None)
-    assert_raises(ValueError, pi1.__div__, 11.5)
+    assert_raises(TypeError, pd1.__add__, 11)
+    assert_raises(TypeError, pd1.__sub__, 11)
+    assert_raises(TypeError, pd1.__mul__, "11")
+    assert_raises(TypeError, pd1.__mul__, None)
+    assert_raises(TypeError, pd1.__div__, "11e")
+
+    assert_raises(TypeError, pi1.__add__, 11)
+    assert_raises(TypeError, pi1.__sub__, 11)
+    assert_raises(TypeError, pi1.__mul__, "11e")
+    assert_raises(TypeError, pi1.__mul__, None)
+    assert_raises(TypeError, pi1.__div__, 11.5)
 
     do_pickle(pi1)
     do_pickle(pd1)
@@ -161,7 +174,10 @@ def test_bounds():
     bi11 = galsim.BoundsI(galsim.BoundsD(11.,23.,17.,50.))
     bi12 = galsim.BoundsI(xmin=11,ymin=17,xmax=23,ymax=50)
     bi13 = galsim._BoundsI(11,23,17,50)
-    for b in [bi1, bi2, bi3, bi4, bi5, bi6, bi7, bi8, bi9, bi10, bi11, bi12, bi13]:
+    bi14 = galsim.BoundsI()
+    bi14 += galsim.PositionI(11,17)
+    bi14 += galsim.PositionI(23,50)
+    for b in [bi1, bi2, bi3, bi4, bi5, bi6, bi7, bi8, bi9, bi10, bi11, bi12, bi13, bi14]:
         assert b.isDefined()
         assert b == bi1
         assert isinstance(b.xmin, int)
@@ -194,7 +210,10 @@ def test_bounds():
     bd11 = galsim.BoundsD(galsim.BoundsI(11,23,17,50))
     bd12 = galsim.BoundsD(xmin=11.0,ymin=17.0,xmax=23.0,ymax=50.0)
     bd13 = galsim._BoundsD(11,23,17,50)
-    for b in [bd1, bd2, bd3, bd4, bd5, bd6, bd7, bd8, bd9, bd10, bd11, bd12, bd13]:
+    bd14 = galsim.BoundsD()
+    bd14 += galsim.PositionD(11.,17.)
+    bd14 += galsim.PositionD(23,50)
+    for b in [bd1, bd2, bd3, bd4, bd5, bd6, bd7, bd8, bd9, bd10, bd11, bd12, bd13, bd14]:
         assert b.isDefined()
         assert b == bd1
         assert isinstance(b.xmin, float)
@@ -205,30 +224,55 @@ def test_bounds():
         assert b.center == galsim.PositionD(17, 33.5)
         assert b.true_center == galsim.PositionD(17, 33.5)
 
+    assert_raises(TypeError, galsim.BoundsI, 11)
+    assert_raises(TypeError, galsim.BoundsI, 11, 23)
     assert_raises(TypeError, galsim.BoundsI, 11, 23, 9)
     assert_raises(TypeError, galsim.BoundsI, 11, 23, 9, 12, 59)
     assert_raises(TypeError, galsim.BoundsI, xmin=11, xmax=23, ymin=17, ymax=50, z=23)
     assert_raises(TypeError, galsim.BoundsI, xmin=11, xmax=50)
-    assert_raises(TypeError, galsim.BoundsI, 11)
-    assert_raises(ValueError, galsim.BoundsI, 11, 23.5, 17, 50.9)
+    assert_raises(TypeError, galsim.BoundsI, 11, 23.5, 17, 50.9)
+    assert_raises(TypeError, galsim.BoundsI, 11, 23, 9, 12, xmin=19, xmax=2)
+    with assert_raises(TypeError):
+        bi1 += (11,23)
 
+    assert_raises(TypeError, galsim.BoundsD, 11)
+    assert_raises(TypeError, galsim.BoundsD, 11, 23)
     assert_raises(TypeError, galsim.BoundsD, 11, 23, 9)
     assert_raises(TypeError, galsim.BoundsD, 11, 23, 9, 12, 59)
     assert_raises(TypeError, galsim.BoundsD, xmin=11, xmax=23, ymin=17, ymax=50, z=23)
     assert_raises(TypeError, galsim.BoundsD, xmin=11, xmax=50)
-    assert_raises(TypeError, galsim.BoundsD, 11)
     assert_raises(ValueError, galsim.BoundsD, 11, 23, 17, "blue")
+    assert_raises(TypeError, galsim.BoundsD, 11, 23, 9, 12, xmin=19, xmax=2)
+    with assert_raises(TypeError):
+        bd1 += (11,23)
+
+    # Can't use base class directly.
+    assert_raises(TypeError, galsim.Bounds, 11, 23, 9, 12)
+    assert_raises(NotImplementedError, galsim.Bounds)
 
     # Check intersection
     assert bi1 == galsim.BoundsI(0,100,0,100) & bi1
     assert bi1 == bi1 & galsim.BoundsI(0,100,0,100)
     assert bi1 == galsim.BoundsI(0,23,0,50) & galsim.BoundsI(11,100,17,100)
     assert bi1 == galsim.BoundsI(0,23,17,100) & galsim.BoundsI(11,100,0,50)
+    assert not (bi1 & galsim.BoundsI()).isDefined()
+    assert not (galsim.BoundsI() & bi1).isDefined()
 
     assert bd1 == galsim.BoundsD(0,100,0,100) & bd1
     assert bd1 == bd1 & galsim.BoundsD(0,100,0,100)
     assert bd1 == galsim.BoundsD(0,23,0,50) & galsim.BoundsD(11,100,17,100)
     assert bd1 == galsim.BoundsD(0,23,17,100) & galsim.BoundsD(11,100,0,50)
+    assert not (bd1 & galsim.BoundsD()).isDefined()
+    assert not (galsim.BoundsD() & bd1).isDefined()
+
+    with assert_raises(TypeError):
+        bi1 & galsim.PositionI(1,2)
+    with assert_raises(TypeError):
+        bi1 & galsim.PositionD(1,2)
+    with assert_raises(TypeError):
+        bd1 & galsim.PositionI(1,2)
+    with assert_raises(TypeError):
+        bd1 & galsim.PositionD(1,2)
 
     # Check withBorder
     assert bi1.withBorder(4) == galsim.BoundsI(7,27,13,54)
@@ -237,13 +281,13 @@ def test_bounds():
     assert bd1.withBorder(4.1) == galsim.BoundsD(6.9,27.1,12.9,54.1)
     assert bd1.withBorder(0) == galsim.BoundsD(11,23,17,50)
     assert bd1.withBorder(-1) == galsim.BoundsD(12,22,18,49)
-    assert_raises(ValueError, bi1.withBorder, 'blue')
-    assert_raises(ValueError, bi1.withBorder, 4.1)
-    assert_raises(ValueError, bi1.withBorder, '4')
-    assert_raises(ValueError, bi1.withBorder, None)
-    assert_raises(ValueError, bd1.withBorder, 'blue')
-    assert_raises(ValueError, bd1.withBorder, '4.1')
-    assert_raises(ValueError, bd1.withBorder, None)
+    assert_raises(TypeError, bi1.withBorder, 'blue')
+    assert_raises(TypeError, bi1.withBorder, 4.1)
+    assert_raises(TypeError, bi1.withBorder, '4')
+    assert_raises(TypeError, bi1.withBorder, None)
+    assert_raises(TypeError, bd1.withBorder, 'blue')
+    assert_raises(TypeError, bd1.withBorder, '4.1')
+    assert_raises(TypeError, bd1.withBorder, None)
 
     # Check expand
     assert bi1.expand(2) == galsim.BoundsI(5,29,0,67)
@@ -306,10 +350,10 @@ def test_bounds():
     assert galsim.BoundsD(23, 11, 17, 50) == galsim.BoundsD()
     assert galsim.BoundsD(11, 23, 50, 17) == galsim.BoundsD()
 
-    assert_raises(ValueError, getattr, galsim.BoundsI(), 'center')
-    assert_raises(ValueError, getattr, galsim.BoundsD(), 'center')
-    assert_raises(ValueError, getattr, galsim.BoundsI(), 'true_center')
-    assert_raises(ValueError, getattr, galsim.BoundsD(), 'true_center')
+    assert_raises(galsim.GalSimUndefinedBoundsError, getattr, galsim.BoundsI(), 'center')
+    assert_raises(galsim.GalSimUndefinedBoundsError, getattr, galsim.BoundsD(), 'center')
+    assert_raises(galsim.GalSimUndefinedBoundsError, getattr, galsim.BoundsI(), 'true_center')
+    assert_raises(galsim.GalSimUndefinedBoundsError, getattr, galsim.BoundsD(), 'true_center')
 
     do_pickle(bi1)
     do_pickle(bd1)
@@ -429,13 +473,15 @@ def test_check_all_contiguous():
 
 @timer
 def test_deInterleaveImage():
+    from galsim.utilities import deInterleaveImage, interleaveImages
+
     np.random.seed(84) # for generating the same random instances
 
     # 1) Check compatability with interleaveImages
     img = galsim.Image(np.random.randn(64,64),scale=0.25)
     img.setOrigin(galsim.PositionI(5,7)) ## for non-trivial bounds
-    im_list, offsets = galsim.utilities.deInterleaveImage(img,8)
-    img1 = galsim.utilities.interleaveImages(im_list,8,offsets)
+    im_list, offsets = deInterleaveImage(img,8)
+    img1 = interleaveImages(im_list,8,offsets)
     np.testing.assert_array_equal(img1.array,img.array,
             err_msg = "interleaveImages cannot reproduce the input to deInterleaveImage for square "
                       "images")
@@ -445,8 +491,8 @@ def test_deInterleaveImage():
 
     img = galsim.Image(abs(np.random.randn(16*5,16*2)),scale=0.5)
     img.setCenter(0,0) ## for non-trivial bounds
-    im_list, offsets = galsim.utilities.deInterleaveImage(img,(2,5))
-    img1 = galsim.utilities.interleaveImages(im_list,(2,5),offsets)
+    im_list, offsets = deInterleaveImage(img,(2,5))
+    img1 = interleaveImages(im_list,(2,5),offsets)
     np.testing.assert_array_equal(img1.array,img.array,
             err_msg = "interleaveImages cannot reproduce the input to deInterleaveImage for "
                       "rectangular images")
@@ -456,7 +502,7 @@ def test_deInterleaveImage():
 
     # 2) Checking for offsets
     img = galsim.Image(np.random.randn(32,32),scale=2.0)
-    im_list, offsets = galsim.utilities.deInterleaveImage(img,(4,2))
+    im_list, offsets = deInterleaveImage(img,(4,2))
 
     ## Checking if offsets are centered around zero
     assert np.sum([offset.x for offset in offsets]) == 0.
@@ -473,7 +519,7 @@ def test_deInterleaveImage():
     img0 = galsim.Image(32,32)
     g0.drawImage(image=img0,method='no_pixel',scale=0.25)
 
-    im_list0, offsets0 = galsim.utilities.deInterleaveImage(img0,2,conserve_flux=True)
+    im_list0, offsets0 = deInterleaveImage(img0,2,conserve_flux=True)
 
     for n in range(len(im_list0)):
         im = galsim.Image(16,16)
@@ -496,8 +542,8 @@ def test_deInterleaveImage():
     g1.drawImage(image=img1,scale=0.5/n1,method='no_pixel')
     g2.drawImage(image=img2,scale=0.5/n2,method='no_pixel')
 
-    im_list1, offsets1 = galsim.utilities.deInterleaveImage(img1,(n1**2,1),conserve_flux=True)
-    im_list2, offsets2 = galsim.utilities.deInterleaveImage(img2,[1,n2**2],conserve_flux=False)
+    im_list1, offsets1 = deInterleaveImage(img1,(n1**2,1),conserve_flux=True)
+    im_list2, offsets2 = deInterleaveImage(img2,[1,n2**2],conserve_flux=False)
 
     for n in range(n1**2):
         im, offset = im_list1[n], offsets1[n]
@@ -514,9 +560,26 @@ def test_deInterleaveImage():
                      "horizontal direction")
         # im is scaled to account for flux not being conserved
 
+    assert_raises(TypeError, deInterleaveImage, image=img0.array, N=2)
+    assert_raises(TypeError, deInterleaveImage, image=img0, N=2.0)
+    assert_raises(TypeError, deInterleaveImage, image=img0, N=(2.0, 2.0))
+    assert_raises(TypeError, deInterleaveImage, image=img0, N=(2,2,3))
+    assert_raises(ValueError, deInterleaveImage, image=img0, N=7)
+    assert_raises(ValueError, deInterleaveImage, image=img0, N=(2,7))
+    assert_raises(ValueError, deInterleaveImage, image=img0, N=(7,2))
+
+    # It is legal to have the input image with wcs=None, but it emits a warning
+    img0.wcs = None
+    with assert_warns(galsim.GalSimWarning):
+        deInterleaveImage(img0, N=2)
+    # Unless suppress_warnings is True
+    deInterleaveImage(img0, N=2, suppress_warnings=True)
+
 
 @timer
 def test_interleaveImages():
+    from galsim.utilities import interleaveImages, deInterleaveImage
+
     # 1a) With galsim Gaussian
     g = galsim.Gaussian(sigma=3.7,flux=1000.)
     gal = galsim.Convolve([g,galsim.Pixel(1.0)])
@@ -534,7 +597,7 @@ def test_interleaveImages():
     scale = im.scale
 
     # Input to N as an int
-    img = galsim.utilities.interleaveImages(im_list,n,offsets=offset_list)
+    img = interleaveImages(im_list,n,offsets=offset_list)
     im = galsim.Image(16*n*n,16*n*n)
     g = galsim.Gaussian(sigma=3.7,flux=1000.*n*n)
     gal = galsim.Convolve([g,galsim.Pixel(1.0)])
@@ -560,7 +623,7 @@ def test_interleaveImages():
     im_list_randperm = [im_list[idx] for idx in rand_idx]
     offset_list_randperm = [offset_list[idx] for idx in rand_idx]
     # Input to N as a tuple
-    img_randperm = galsim.utilities.interleaveImages(im_list_randperm,(n,n),offsets=offset_list_randperm)
+    img_randperm = interleaveImages(im_list_randperm,(n,n),offsets=offset_list_randperm)
 
     np.testing.assert_array_equal(img_randperm.array,img.array,
         err_msg="Interleaved images do not match when 'offsets' is supplied")
@@ -571,7 +634,7 @@ def test_interleaveImages():
     im_list = []
     n = 5
     # Generate approximate offsets
-    DX = np.array([-0.67,-0.33,0.,0.33,0.67])
+    DX = np.array([-0.47,-0.23,0.,0.23,0.47])
     DY = DX
     for dy in DY:
         for dx in DX:
@@ -583,7 +646,9 @@ def test_interleaveImages():
 
     N = (n,n)
     with assert_raises(ValueError):
-        galsim.utilities.interleaveImages(im_list,N,offset_list)
+        interleaveImages(im_list,N,offset_list)
+    # Can turn off the checks and just use these as they are with catch_offset_errors=False
+    interleaveImages(im_list,N,offset_list, catch_offset_errors=False)
 
     offset_list = []
     im_list = []
@@ -600,7 +665,8 @@ def test_interleaveImages():
 
     N = (n,n)
     with assert_raises(ValueError):
-        galsim.utilities.interleaveImages(im_list, N, offset_list)
+        interleaveImages(im_list, N, offset_list)
+    interleaveImages(im_list, N, offset_list, catch_offset_errors=False)
 
     # 2a) Increase resolution along one direction - square to rectangular images
     n = 2
@@ -619,8 +685,8 @@ def test_interleaveImages():
         gal1.drawImage(im,offset=offset,method='no_pixel',scale=2.0)
         im_list.append(im)
 
-    img = galsim.utilities.interleaveImages(im_list, N=[1,n**2], offsets=offset_list,
-                                            add_flux=False, suppress_warnings=True)
+    img = interleaveImages(im_list, N=[1,n**2], offsets=offset_list,
+                           add_flux=False, suppress_warnings=True)
     im = galsim.Image(16,16*n*n)
     # The interleaved image has the total flux averaged out since `add_flux = False'
     gal = galsim.Gaussian(sigma=3.7*n,flux=100.)
@@ -647,7 +713,7 @@ def test_interleaveImages():
         gal2.drawImage(im,offset=offset,method='no_pixel',scale=3.0)
         im_list.append(im)
 
-    img = galsim.utilities.interleaveImages(im_list, N=np.array([n**2,1]), offsets=offset_list,
+    img = interleaveImages(im_list, N=np.array([n**2,1]), offsets=offset_list,
                                             suppress_warnings=True)
     im = galsim.Image(16*n*n,16*n*n)
     gal = galsim.Gaussian(sigma=3.7,flux=100.*n*n)
@@ -676,8 +742,8 @@ def test_interleaveImages():
             im.setOrigin(3,3) # for non-trivial bounds
             im_list.append(im)
 
-    img = galsim.utilities.interleaveImages(im_list,N=n,offsets=offset_list)
-    im_list_1, offset_list_1 = galsim.utilities.deInterleaveImage(img, N=n)
+    img = interleaveImages(im_list,N=n,offsets=offset_list)
+    im_list_1, offset_list_1 = deInterleaveImage(img, N=n)
 
     for k in range(n**2):
         assert offset_list_1[k] == offset_list[k]
@@ -688,13 +754,44 @@ def test_interleaveImages():
         assert im_list[k].bounds == im_list_1[k].bounds
 
     # Checking for non-default flux option
-    img = galsim.utilities.interleaveImages(im_list,N=n,offsets=offset_list,add_flux=False)
-    im_list_2, offset_list_2 = galsim.utilities.deInterleaveImage(img,N=n,conserve_flux=True)
+    img = interleaveImages(im_list,N=n,offsets=offset_list,add_flux=False)
+    im_list_2, offset_list_2 = deInterleaveImage(img,N=n,conserve_flux=True)
 
     for k in range(n**2):
         assert offset_list_2[k] == offset_list[k]
         np.testing.assert_array_equal(im_list_2[k].array, im_list[k].array)
         assert im_list_2[k].wcs == im_list[k].wcs
+
+    assert_raises(TypeError, interleaveImages, im_list=img, N=n, offsets=offset_list)
+    assert_raises(ValueError, interleaveImages, [img], N=1, offsets=offset_list)
+    assert_raises(ValueError, interleaveImages, im_list, n, offset_list[:-1])
+    assert_raises(TypeError, interleaveImages, [im.array for im in im_list], n, offset_list)
+    assert_raises(TypeError, interleaveImages,
+                  [im_list[0]] + [im.array for im in im_list[1:]],
+                  n, offset_list)
+    assert_raises(TypeError, interleaveImages,
+                  [galsim.Image(16+i,16+j,scale=1) for i in range(n) for j in range(n)],
+                  n, offset_list)
+    assert_raises(TypeError, interleaveImages,
+                  [galsim.Image(16,16,scale=i) for i in range(n) for j in range(n)],
+                  n, offset_list)
+    assert_raises(TypeError, interleaveImages, im_list, N=3.0, offsets=offset_list)
+    assert_raises(TypeError, interleaveImages, im_list, N=(3.0, 3.0), offsets=offset_list)
+    assert_raises(TypeError, interleaveImages, im_list, N=(3,3,3), offsets=offset_list)
+    assert_raises(ValueError, interleaveImages, im_list, N=7, offsets=offset_list)
+    assert_raises(ValueError, interleaveImages, im_list, N=(2,7), offsets=offset_list)
+    assert_raises(ValueError, interleaveImages, im_list, N=(7,2), offsets=offset_list)
+    assert_raises(TypeError, interleaveImages, im_list, N=n)
+    assert_raises(TypeError, interleaveImages, im_list, N=n, offsets=offset_list[0])
+    assert_raises(TypeError, interleaveImages, im_list, N=n, offsets=range(n*n))
+
+    # It is legal to have the input images with wcs=None, but it emits a warning
+    for im in im_list:
+        im.wcs = None
+    with assert_warns(galsim.GalSimWarning):
+        interleaveImages(im_list, N=n, offsets=offset_list)
+    # Unless suppress_warnings is True
+    interleaveImages(im_list, N=n, offsets=offset_list, suppress_warnings=True)
 
 
 @timer
@@ -730,6 +827,13 @@ def test_python_LRU_Cache():
         assert cache(i) == f(i)
     assert (1,) not in cache.cache
 
+    # "Resize" to same size does nothing.
+    cache.resize(newsize)
+    assert len(cache.cache) == 20
+    assert (1,) not in cache.cache
+    for i in range(2, newsize+2):
+        assert (i,) in cache.cache
+
     # Test mostly non-destructive cache contraction.
     # Already bumped (0,) and (1,), so (2,) should be the first to get bumped
     for i in range(newsize-1, size, -1):
@@ -737,56 +841,85 @@ def test_python_LRU_Cache():
         cache.resize(i)
         assert (newsize - (i - 1),) not in cache.cache
 
+    assert_raises(ValueError, cache.resize, 0)
+    assert_raises(ValueError, cache.resize, -20)
+
+
 @timer
 def test_rand_with_replacement():
     """Test routine to select random indices with replacement."""
     # Most aspects of this routine get tested when it's used by COSMOSCatalog.  We just check some
     # of the exception-handling here.
-    with assert_raises(ValueError):
-        galsim.utilities.rand_with_replacement(
-            n=1.5, n_choices=10, rng=galsim.BaseDeviate(1234))
+
+    # Invalid rng
     with assert_raises(TypeError):
         galsim.utilities.rand_with_replacement(
             n=2, n_choices=10, rng='foo')
+
+    # Invalid n
+    with assert_raises(ValueError):
+        galsim.utilities.rand_with_replacement(
+            n=1.5, n_choices=10, rng=galsim.BaseDeviate(1234))
+    with assert_raises(ValueError):
+        galsim.utilities.rand_with_replacement(
+            n=0, n_choices=10, rng=galsim.BaseDeviate(1234))
+    with assert_raises(ValueError):
+        galsim.utilities.rand_with_replacement(
+            n=-2, n_choices=10, rng=galsim.BaseDeviate(1234))
+
+    # Invalid n_choices
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
             n=2, n_choices=10.5, rng=galsim.BaseDeviate(1234))
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
-            n=2, n_choices=-11, rng=galsim.BaseDeviate(1234))
+            n=2, n_choices=0, rng=galsim.BaseDeviate(1234))
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
-            n=-2, n_choices=11, rng=galsim.BaseDeviate(1234))
+            n=2, n_choices=-11, rng=galsim.BaseDeviate(1234))
 
+    # Negative weights
     tmp_weights = np.arange(10).astype(float)-3
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
             n=2, n_choices=10, rng=galsim.BaseDeviate(1234), weight=tmp_weights)
+    # NaN weights
     tmp_weights[0] = np.nan
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
             n=2, n_choices=10, rng=galsim.BaseDeviate(1234), weight=tmp_weights)
+    # inf weights
     tmp_weights[0] = np.inf
     with assert_raises(ValueError):
         galsim.utilities.rand_with_replacement(
             n=2, n_choices=10, rng=galsim.BaseDeviate(1234), weight=tmp_weights)
 
+    # Wrong length for weights
+    with assert_raises(ValueError):
+        galsim.utilities.rand_with_replacement(
+            n=2, n_choices=10, rng=galsim.BaseDeviate(1234), weight=tmp_weights[:4])
+
     # Make sure results come out the same whether we use _n_rng_calls or not.
-    result_1 = galsim.utilities.rand_with_replacement(n=10, n_choices=100,
-                                                      rng=galsim.BaseDeviate(314159))
-    result_2, _ = galsim.utilities.rand_with_replacement(n=10, n_choices=100,
-                                                         rng=galsim.BaseDeviate(314159),
-                                                         _n_rng_calls=True)
+    rng1 = galsim.BaseDeviate(314159)
+    rng2 = galsim.BaseDeviate(314159)
+    rng3 = galsim.BaseDeviate(314159)
+    result_1 = galsim.utilities.rand_with_replacement(n=10, n_choices=100, rng=rng1)
+    result_2, n_rng = galsim.utilities.rand_with_replacement(n=10, n_choices=100, rng=rng2,
+                                                             _n_rng_calls=True)
     assert np.all(result_1==result_2),"Using _n_rng_calls results in different random numbers"
+    rng3.discard(n_rng)
+    assert rng1.raw() == rng2.raw() == rng3.raw()
+
+    # Repeat with weights
     weight = np.zeros(100)
     galsim.UniformDeviate(1234).generate(weight)
-    result_1 = galsim.utilities.rand_with_replacement(
-        n=10, n_choices=100, rng=galsim.BaseDeviate(314159), weight=weight)
+    result_1 = galsim.utilities.rand_with_replacement(10, 100, rng1, weight=weight)
     assert not np.all(result_1==result_2),"Weights did not have an effect"
-    result_2, _ = galsim.utilities.rand_with_replacement(
-        n=10, n_choices=100, rng=galsim.BaseDeviate(314159),
-        weight=weight, _n_rng_calls=True)
+    result_2, n_rng = galsim.utilities.rand_with_replacement(10, 100, rng2, weight=weight,
+                                                             _n_rng_calls=True)
     assert np.all(result_1==result_2),"Using _n_rng_calls results in different random numbers"
+    rng3.discard(n_rng)
+    assert rng1.raw() == rng2.raw() == rng3.raw()
 
 @timer
 def test_position_type_promotion():

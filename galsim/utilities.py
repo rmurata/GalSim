@@ -23,9 +23,12 @@ from contextlib import contextmanager
 from future.utils import iteritems
 from builtins import range, object
 import weakref
-
-
+import os
 import numpy as np
+
+from .errors import GalSimError, GalSimValueError, GalSimIncompatibleValuesError, GalSimRangeError
+from .errors import galsim_warn
+
 
 def roll2d(image, shape):
     """Perform a 2D roll (circular shift) on a supplied 2D NumPy array, conveniently.
@@ -100,9 +103,6 @@ def rotate_xy(x, y, theta):
 
     @return the rotated coordinates `(x_rot,y_rot)`.
     """
-    from .angle import Angle
-    if not isinstance(theta, Angle):
-        raise TypeError("Input rotation angle theta must be a galsim.Angle instance.")
     sint, cost = theta.sincos()
     x_rot = x * cost - y * sint
     y_rot = x * sint + y * cost
@@ -131,9 +131,11 @@ def parse_pos_args(args, kwargs, name1, name2, integer=False, others=[]):
     other_vals = []
     if len(args) == 0:
         # Then name1,name2 need to be kwargs
-        # If not, then python will raise an appropriate error.
-        x = kwargs.pop(name1)
-        y = kwargs.pop(name2)
+        try:
+            x = kwargs.pop(name1)
+            y = kwargs.pop(name2)
+        except KeyError:
+            raise TypeError('Expecting kwargs %s, %s.  Got %s'%(name1, name2, kwargs.keys()))
     elif ( ( isinstance(args[0], PositionI) or
              (not integer and isinstance(args[0], PositionD)) ) and
            len(args) <= 1+len(others) ):
@@ -148,11 +150,11 @@ def parse_pos_args(args, kwargs, name1, name2, integer=False, others=[]):
         for arg in args[1:]:
             other_vals.append(arg)
             others.pop(0)
-    elif len(args) == 1:  # pragma: no cover
+    elif len(args) == 1:
         if integer:
-            raise TypeError("Cannot parse argument "+str(args[0])+" as a PositionI")
+            raise TypeError("Cannot parse argument %s as a PositionI"%(args[0]))
         else:
-            raise TypeError("Cannot parse argument "+str(args[0])+" as a PositionD")
+            raise TypeError("Cannot parse argument %s as a PositionD"%(args[0]))
     elif len(args) <= 2 + len(others):
         x = args[0]
         y = args[1]
@@ -261,16 +263,19 @@ def _convertPositions(pos, units, func):
        This is used by the functions getShear(), getConvergence(), getMagnification(), and
        getLensing() for both PowerSpectrum and NFWHalo.
     """
-    from .position import PositionD, PositionI
+    from .position import Position
     from .angle import AngleUnit, arcsec
     # Check for PositionD or PositionI:
-    if isinstance(pos, PositionD) or isinstance(pos, PositionI):
+    if isinstance(pos, Position):
         pos = [ pos.x, pos.y ]
 
-    # Check for list of PositionD or PositionI:
+    elif len(pos) == 0:
+        raise TypeError("Unable to parse the input pos argument for %s."%func)
+
+    # Check for list of Position:
     # The only other options allow pos[0], so if this is invalid, an exception
     # will be raised:
-    elif isinstance(pos[0], PositionD) or isinstance(pos[0], PositionI):
+    elif isinstance(pos[0], Position):
         pos = [ np.array([p.x for p in pos], dtype='float'),
                 np.array([p.y for p in pos], dtype='float') ]
 
@@ -292,7 +297,8 @@ def _convertPositions(pos, units, func):
         # if the string is invalid, this raises a reasonable error message.
         units = AngleUnit.from_name(units)
     if not isinstance(units, AngleUnit):
-        raise ValueError("units must be either an AngleUnit or a string")
+        raise GalSimValueError("units must be either an AngleUnit or a string", units,
+                               ('arcsec', 'arcmin', 'degree', 'hour', 'radian'))
 
     # Convert pos to arcsec
     if units != arcsec:
@@ -390,26 +396,26 @@ def thin_tabulated_values(x, f, rel_err=1.e-4, trim_zeros=True, preserve_range=T
 
     # Check for valid inputs
     if len(x) != len(f):
-        raise ValueError("len(x) != len(f)")
+        raise GalSimIncompatibleValuesError("len(x) != len(f)", x=x, f=f)
     if rel_err <= 0 or rel_err >= 1:
-        raise ValueError("rel_err must be between 0 and 1")
+        raise GalSimRangeError("rel_err must be between 0 and 1", rel_err, 0., 1.)
     if not (np.diff(x) >= 0).all():
-        raise ValueError("input x is not sorted.")
+        raise GalSimValueError("input x is not sorted.", x)
 
     # Check for trivial noop.
     if len(x) <= 2:
         # Nothing to do
         return x,f
 
-    if trim_zeros:
-        first = max(f.nonzero()[0][0]-1, 0)  # -1 to keep one non-redundant zero.
-        last = min(f.nonzero()[0][-1]+1, len(x)-1)  # +1 to keep one non-redundant zero.
-        x, f = x[first:last+1], f[first:last+1]
-
     total_integ = np.trapz(abs(f), x)
     if total_integ == 0:
         return np.array([ x[0], x[-1] ]), np.array([ f[0], f[-1] ])
     thresh = total_integ * rel_err
+
+    if trim_zeros:
+        first = max(f.nonzero()[0][0]-1, 0)  # -1 to keep one non-redundant zero.
+        last = min(f.nonzero()[0][-1]+1, len(x)-1)  # +1 to keep one non-redundant zero.
+        x, f = x[first:last+1], f[first:last+1]
 
     x_range = x[-1] - x[0]
     if not preserve_range:
@@ -488,11 +494,11 @@ def old_thin_tabulated_values(x, f, rel_err=1.e-4, preserve_range=False): # prag
 
     # Check for valid inputs
     if len(x) != len(f):
-        raise ValueError("len(x) != len(f)")
+        raise GalSimIncompatibleValuesError("len(x) != len(f)", x=x, f=f)
     if rel_err <= 0 or rel_err >= 1:
-        raise ValueError("rel_err must be between 0 and 1")
+        raise GalSimRangeError("rel_err must be between 0 and 1", rel_err, 0., 1.)
     if not (np.diff(x) >= 0).all():
-        raise ValueError("input x is not sorted.")
+        raise GalSimValueError("input x is not sorted.", x)
 
     # Check for trivial noop.
     if len(x) <= 2:
@@ -569,37 +575,6 @@ def old_thin_tabulated_values(x, f, rel_err=1.e-4, preserve_range=False): # prag
 
     return newx, newf
 
-
-def _gammafn(x):  # pragma: no cover
-    """
-    This code is not currently used, but in case we need a gamma function at some point, it will be
-    here in the utilities module.
-
-    The gamma function is present in python2.7's math module, but not 2.6.  So try using that,
-    and if it fails, use some code from RosettaCode:
-    http://rosettacode.org/wiki/Gamma_function#Python
-    """
-    try:
-        import math
-        return math.gamma(x)
-    except AttributeError:
-        y  = float(x) - 1.0
-        sm = _gammafn._a[-1]
-        for an in _gammafn._a[-2::-1]:
-            sm = sm * y + an
-        return 1.0 / sm
-
-_gammafn._a = ( 1.00000000000000000000, 0.57721566490153286061, -0.65587807152025388108,
-              -0.04200263503409523553, 0.16653861138229148950, -0.04219773455554433675,
-              -0.00962197152787697356, 0.00721894324666309954, -0.00116516759185906511,
-              -0.00021524167411495097, 0.00012805028238811619, -0.00002013485478078824,
-              -0.00000125049348214267, 0.00000113302723198170, -0.00000020563384169776,
-               0.00000000611609510448, 0.00000000500200764447, -0.00000000118127457049,
-               0.00000000010434267117, 0.00000000000778226344, -0.00000000000369680562,
-               0.00000000000051003703, -0.00000000000002058326, -0.00000000000000534812,
-               0.00000000000000122678, -0.00000000000000011813, 0.00000000000000000119,
-               0.00000000000000000141, -0.00000000000000000023, 0.00000000000000000002
-             )
 
 def horner(x, coef, dtype=None):
     """Evaluate univariate polynomial using Horner's method.
@@ -697,25 +672,20 @@ def deInterleaveImage(image, N, conserve_flux=False,suppress_warnings=False):
     from .wcs import JacobianWCS, PixelScale
     if isinstance(N,int):
         n1,n2 = N,N
-    elif hasattr(N,'__iter__'):
-        if len(N)==2:
-            n1,n2 = N
-        else:
-            raise TypeError("'N' has to be a list or a tuple of two integers")
-        if not (n1 == int(n1) and n2 == int(n2)):
-            raise TypeError("'N' has to be of type int or a list or a tuple of two integers")
-        n1 = int(n1)
-        n2 = int(n2)
     else:
-        raise TypeError("'N' has to be of type int or a list or a tuple of two integers")
+        try:
+            n1,n2 = N
+        except (TypeError, ValueError):
+            raise TypeError("N must be an integer or a tuple of two integers")
 
     if not isinstance(image, Image):
-        raise TypeError("'image' has to be an instance of galsim.Image")
+        raise TypeError("image must be an instance of galsim.Image")
 
     y_size,x_size = image.array.shape
     if x_size%n1 or y_size%n2:
-        raise ValueError("The value of 'N' is incompatible with the dimensions of the image to "+
-                         +"be 'deinterleaved'")
+        raise GalSimIncompatibleValuesError(
+            "The value of N is incompatible with the dimensions of the image to be deinterleaved",
+            N=N, image=image)
 
     im_list, offsets = [], []
     for i in range(n1):
@@ -749,14 +719,13 @@ def deInterleaveImage(image, N, conserve_flux=False,suppress_warnings=False):
             img.setOrigin(image.origin)
 
     elif suppress_warnings is False:
-        import warnings
-        warnings.warn("Individual images could not be assigned a WCS automatically.")
+        galsim_warn("Individual images could not be assigned a WCS automatically.")
 
     return im_list, offsets
 
 
 def interleaveImages(im_list, N, offsets, add_flux=True, suppress_warnings=False,
-    catch_offset_errors=True):
+                     catch_offset_errors=True):
     """
     Interleaves the pixel values from two or more images and into a single larger image.
 
@@ -834,33 +803,29 @@ def interleaveImages(im_list, N, offsets, add_flux=True, suppress_warnings=False
     from .wcs import PixelScale, JacobianWCS
     if isinstance(N,int):
         n1,n2 = N,N
-    elif hasattr(N,'__iter__'):
-        if len(N)==2:
-            n1,n2 = N
-        else:
-            raise TypeError("'N' has to be a list or a tuple of two integers")
-        if not (n1 == int(n1) and n2 == int(n2)):
-            raise TypeError("'N' has to be of type int or a list or a tuple of two integers")
-        n1 = int(n1)
-        n2 = int(n2)
     else:
-        raise TypeError("'N' has to be of type int or a list or a tuple of two integers")
+        try:
+            n1,n2 = N
+        except (TypeError, ValueError):
+            raise TypeError("N must be an integer or a tuple of two integers")
 
     if len(im_list)<2:
-        raise TypeError("'im_list' needs to have at least two instances of galsim.Image")
+        raise GalSimValueError("im_list must have at least two instances of galsim.Image", im_list)
 
     if (n1*n2 != len(im_list)):
-        raise ValueError("'N' is incompatible with the number of images in 'im_list'")
+        raise GalSimIncompatibleValuesError(
+            "N is incompatible with the number of images in im_list", N=N, im_list=im_list)
 
     if len(im_list)!=len(offsets):
-        raise ValueError("'im_list' and 'offsets' must be lists of same length")
+        raise GalSimIncompatibleValuesError(
+            "im_list and offsets must be lists of same length", im_list=im_list, offsets=offsets)
 
     for offset in offsets:
         if not isinstance(offset, PositionD):
-            raise TypeError("'offsets' must be a list of galsim.PositionD instances")
+            raise TypeError("offsets must be a list of galsim.PositionD instances")
 
     if not isinstance(im_list[0], Image):
-        raise TypeError("'im_list' must be a list of galsim.Image instances")
+        raise TypeError("im_list must be a list of galsim.Image instances")
 
     # These should be the same for all images in `im_list'.
     y_size, x_size = im_list[0].array.shape
@@ -868,14 +833,15 @@ def interleaveImages(im_list, N, offsets, add_flux=True, suppress_warnings=False
 
     for im in im_list[1:]:
         if not isinstance(im, Image):
-            raise TypeError("'im_list' must be a list of galsim.Image instances")
+            raise TypeError("im_list must be a list of galsim.Image instances")
 
         if im.array.shape != (y_size,x_size):
-            raise ValueError("All galsim.Image instances in 'im_list' must be of the same size")
+            raise GalSimIncompatibleValuesError(
+                "All galsim.Image instances in im_list must be of the same size", im_list=im_list)
 
         if im.wcs != wcs:
-            raise ValueError(
-                "All galsim.Image instances in 'im_list' must have the same WCS")
+            raise GalSimIncompatibleValuesError(
+                "All galsim.Image instances in im_list must have the same WCS", im_list=im_list)
 
     img_array = np.zeros((n2*y_size,n1*x_size))
     # The tricky part - going from (x,y) Image coordinates to array indices
@@ -892,16 +858,23 @@ def interleaveImages(im_list, N, offsets, add_flux=True, suppress_warnings=False
             err_j = (n2-1)*0.5-n2*dy - round((n2-1)*0.5-n2*dy)
             tol = 1.e-6
             if abs(err_i)>tol or abs(err_j)>tol:
-                raise ValueError(
-                    "'offsets' must be a list of galsim.PositionD instances with x values "+
-                    "spaced by 1/{0} and y values by 1/{1} around 0 for N = ".format(n1,n2)+str(N))
+                raise GalSimIncompatibleValuesError(
+                    "offsets must be a list of galsim.PositionD instances with x values "
+                    "spaced by 1/{0} and y values by 1/{1} around 0.".format(n1,n2),
+                    N=N, offsets=offsets)
 
-            if i<0 or j<0 or i>=x_size or j>=y_size:
-                raise ValueError(
-                    "'offsets' must be a list of galsim.PositionD instances with x values "+
-                    "spaced by 1/{0} and y values by 1/{1} around 0 for N = ".format(n1,n2)+str(N))
+            if i<0 or j<0 or i>=n1 or j>=n2:
+                raise GalSimIncompatibleValuesError(
+                    "offsets must be a list of galsim.PositionD instances with x values "
+                    "spaced by 1/{0} and y values by 1/{1} around 0.".format(n1,n2),
+                    N=N, offsets=offsets)
+        else:
+            # If we're told to just trust the offsets, at least make sure the slice will be
+            # the right shape.
+            i = i%n1
+            j = j%n2
 
-        img_array[j::n2,i::n1] = im_list[k].array[:,:]
+        img_array[j::n2,i::n1] = im_list[k].array
 
     img = Image(img_array)
     if not add_flux:
@@ -921,17 +894,15 @@ def interleaveImages(im_list, N, offsets, add_flux=True, suppress_warnings=False
             img.wcs = img_wcs
 
     elif suppress_warnings is False:
-        import warnings
-        warnings.warn("Interleaved image could not be assigned a WCS automatically.")
+        galsim_warn("Interleaved image could not be assigned a WCS automatically.")
 
     # Assign a possibly non-trivial origin and warn if individual image have different origins.
     orig = im_list[0].origin
     img.setOrigin(orig)
     for im in im_list[1:]:
         if not im.origin==orig:  # pragma: no cover
-            import warnings
-            warnings.warn("Images in `im_list' have multiple values for origin. Assigning the \
-            origin of the first Image instance in 'im_list' to the interleaved image.")
+            galsim_warn("Images in `im_list' have multiple values for origin. Assigning the "
+                        "origin of the first Image instance in 'im_list' to the interleaved image.")
             break
 
     return img
@@ -1016,6 +987,8 @@ class LRU_Cache:
         else:
             root = self.root
             cache = self.cache
+            if maxsize <= 0:
+                raise GalSimValueError("Invalid maxsize", maxsize)
             if maxsize < oldsize:
                 for i in range(oldsize - maxsize):
                     # Delete root.next
@@ -1023,15 +996,13 @@ class LRU_Cache:
                     new_next_link = root[1] = root[1][1]
                     new_next_link[0] = root
                     del cache[current_next_link[2]]
-            elif maxsize > oldsize:
+            else: #  maxsize > oldsize:
                 for i in range(maxsize - oldsize):
                     # Insert between root and root.next
                     key = object()
                     cache[key] = link = [root, root[1], key, None]
                     root[1][0] = link
                     root[1] = link
-            else:
-                raise ValueError("Invalid maxsize: {0:}".format(maxsize))
 
 
 # http://stackoverflow.com/questions/2891790/pretty-printing-of-numpy-array
@@ -1068,14 +1039,16 @@ def dol_to_lod(dol, N=None):
                 out[k] = v[i]
             except IndexError:  # It's list-like, but too short.
                 if len(v) != 1:
-                    raise ValueError("Cannot broadcast kwargs of different non-length-1 lengths.")
+                    raise GalSimIncompatibleValuesError(
+                        "Cannot broadcast kwargs of different non-length-1 lengths.", dol=dol)
                 out[k] = v[0]
             except TypeError:  # Value is not list-like, so broadcast it in its entirety.
                 out[k] = v
             except KeyboardInterrupt:
                 raise
             except: # pragma: no cover
-                raise ValueError("Cannot broadcast kwarg {0}={1}".format(k, v))
+                raise GalSimIncompatibleValuesError(
+                    "Cannot broadcast kwarg {0}={1}".format(k, v), dol=dol)
         yield out
 
 def structure_function(image):
@@ -1087,8 +1060,11 @@ def structure_function(image):
 
     where the x and r on the RHS are 2D vectors, but the |r| on the LHS is just a scalar length.
 
-    @param image  Image containing random field realization.  The `.scale` attribute here *is* used
-                  in the calculation.  If it's `None`, then the code will use 1.0 for the scale.
+    The image must have its `scale` attribute defined.  It will be used in the calculations to
+    set the scale of the radial distances.
+
+    @param image  Image containing random field realization.
+
     @returns      A python callable mapping a separation length r to the estimate of the structure
                   function D(r).
     """
@@ -1096,8 +1072,6 @@ def structure_function(image):
     array = image.array
     nx, ny = array.shape
     scale = image.scale
-    if scale is None:
-        scale = 1.0
 
     # The structure function can be derived from the correlation function B(r) as:
     # D(r) = 2 * [B(0) - B(r)]
@@ -1133,8 +1107,8 @@ def combine_wave_list(*args):
         elif isinstance(args[0], (list, tuple)):
             args = args[0]
         else:
-            raise TypeError("Single input argument must be a SED, Bandpass, GSObject, "
-                            " ChromaticObject or a (possibly mixed) list of them.")
+            raise TypeError("Single input argument must be an SED, Bandpass, GSObject, "
+                            "ChromaticObject or a (possibly mixed) list of them.")
 
     blue_limit = 0.0
     red_limit = np.inf
@@ -1147,7 +1121,7 @@ def combine_wave_list(*args):
         wave_list = np.union1d(wave_list, obj.wave_list)
     wave_list = wave_list[(wave_list >= blue_limit) & (wave_list <= red_limit)]
     if blue_limit > red_limit:
-        raise RuntimeError("Empty wave_list intersection.")
+        raise GalSimError("Empty wave_list intersection.")
     # Make sure both limits are included.
     if len(wave_list) > 0 and (wave_list[0] != blue_limit or wave_list[-1] != red_limit):
         wave_list = np.union1d([blue_limit, red_limit], wave_list)
@@ -1323,26 +1297,27 @@ def rand_with_replacement(n, n_choices, rng, weight=None, _n_rng_calls=False):
     from .random import BaseDeviate, UniformDeviate
     # Make sure we got a proper RNG.
     if not isinstance(rng, BaseDeviate):
-        raise TypeError("The rng provided to rand_with_replacement() is not a BaseDeviate")
+        raise TypeError("The rng provided to rand_with_replacement() must be a BaseDeviate")
     ud = UniformDeviate(rng)
 
     # Sanity check the requested number of random indices.
     # Note: we do not require that the type be an int, as long as the value is consistent with
     # an integer value (i.e., it could be a float 1.0 or 1).
-    if not n-int(n) == 0 or n < 1:
-        raise ValueError("n must be an integer >= 1.")
-    if not n_choices-int(n_choices) == 0 or n_choices < 1:
-        raise ValueError("n_choices must be an integer >= 1.")
+    if n != int(n) or n < 1:
+        raise GalSimValueError("n must be an integer >= 1.", n)
+    if n_choices != int(n_choices) or n_choices < 1:
+        raise GalSimValueError("n_choices must be an integer >= 1.", n_choices)
 
     # Sanity check the input weight.
     if weight is not None:
         # We need some sanity checks here in case people passed in weird values.
         if len(weight) != n_choices:
-            raise ValueError("Array of weights has wrong length: %d instead of %d"%
-                                 (len(weight), n_choices))
-        if np.min(weight)<0 or np.max(weight)>1 or np.any(np.isnan(weight)) or \
-                np.any(np.isinf(weight)):
-            raise ValueError("Supplied weights include values outside [0,1] or inf/NaN values!")
+            raise GalSimIncompatibleValuesError(
+                "Array of weights has wrong length", weight=weight, n_choices=n_choices)
+        if (np.min(weight)<0 or np.max(weight)>1 or np.any(np.isnan(weight)) or
+            np.any(np.isinf(weight))):
+            raise GalSimValueError("Supplied weights include values outside [0,1] or inf/NaN.",
+                                   weight)
 
     # We first make a random list of integer indices.
     index = np.zeros(n)
@@ -1485,6 +1460,34 @@ class WeakMethod(object):
         self.f = f.__func__
         self.c = weakref.ref(f.__self__)
     def __call__(self, *args):
-        if self.c() is None :
+        if self.c() is None :  # pragma: no cover
             raise TypeError('Method called on dead object')
         return self.f(self.c(), *args)
+
+def ensure_dir(target):
+    """
+    Make sure the directory for the target location exists, watching for a race condition
+
+    In particular check if the OS reported that the directory already exists when running
+    makedirs, which can happen if another process creates it before this one can
+    """
+
+    _ERR_FILE_EXISTS=17
+    dir = os.path.dirname(target)
+    if dir == '': return
+
+    exists = os.path.exists(dir)
+    if not exists:
+        try:
+            os.makedirs(dir)
+        except OSError as err:  # pragma: no cover
+            # check if the file now exists, which can happen if some other
+            # process created the directory between the os.path.exists call
+            # above and the time of the makedirs attempt.  This is OK
+            if err.errno != _ERR_FILE_EXISTS:
+                raise err
+
+    elif exists and not os.path.isdir(dir):  # pragma: no cover
+        raise OSError("tried to make directory '%s' "
+                      "but a non-directory file of that "
+                      "name already exists" % dir)

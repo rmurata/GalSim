@@ -28,22 +28,6 @@ path, filename = os.path.split(__file__)
 imgdir = os.path.join(path, "SBProfile_comparison_images") # Directory containing the reference
                                                            # images.
 
-
-# These are the default GSParams used when unspecified.  We'll check that specifying
-# these explicitly produces the same results.
-default_params = galsim.GSParams(
-        minimum_fft_size = 128,
-        maximum_fft_size = 4096,
-        folding_threshold = 5.e-3,
-        maxk_threshold = 1.e-3,
-        kvalue_accuracy = 1.e-5,
-        xvalue_accuracy = 1.e-5,
-        shoot_accuracy = 1.e-5,
-        realspace_relerr = 1.e-4,
-        realspace_abserr = 1.e-6,
-        integration_relerr = 1.e-6,
-        integration_abserr = 1.e-8)
-
 @timer
 def test_sersic():
     """Test the generation of a specific Sersic profile against a known result.
@@ -153,7 +137,22 @@ def test_sersic():
 
     # Should raise an exception if both scale_radius and half_light_radius are provided.
     assert_raises(TypeError, galsim.Sersic, n=1.2, scale_radius=3, half_light_radius=1)
+    assert_raises(TypeError, galsim.Sersic, n=1.2)
     assert_raises(TypeError, galsim.DeVaucouleurs, scale_radius=3, half_light_radius=1)
+    assert_raises(TypeError, galsim.DeVaucouleurs)
+
+    # Allowed range is [0.3, 6.2]
+    assert_raises(ValueError, galsim.Sersic, n=0.2, scale_radius=3)
+    assert_raises(ValueError, galsim.Sersic, n=6.3, scale_radius=3)
+
+    # trunc must be > sqrt(2) * hlr
+    assert_raises(ValueError, galsim.Sersic, n=3, half_light_radius=1, trunc=1.4)
+    assert_raises(ValueError, galsim.DeVaucouleurs, half_light_radius=1, trunc=1.4)
+
+    # Other errors
+    assert_raises(TypeError, galsim.Sersic, scale_radius=3)
+    assert_raises(ValueError, galsim.Sersic, n=3, scale_radius=3, trunc=-1)
+    assert_raises(ValueError, galsim.DeVaucouleurs, scale_radius=3, trunc=-1)
 
 
 @timer

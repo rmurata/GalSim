@@ -24,6 +24,7 @@ from .gsobject import GSObject
 from .gsparams import GSParams
 from .utilities import lazy_property, doc_inherit
 from .position import PositionD
+from .errors import GalSimRangeError, GalSimIncompatibleValuesError, convert_cpp_errors
 
 class Sersic(GSObject):
     """A class describing a Sersic profile.
@@ -196,6 +197,9 @@ class Sersic(GSObject):
     _is_analytic_x = True
     _is_analytic_k = True
 
+    _minimum_n = 0.3  # Lower bounds has hard limit at ~0.29
+    _maximum_n = 6.2  # Upper bounds is just where we have tested that code works well.
+
     # The conversion from hlr to scale radius is complicated for Sersic, especially since we
     # allow it to be truncated.  So we do these calculations in the C++-layer constructor.
     def __init__(self, n, half_light_radius=None, scale_radius=None,
@@ -205,26 +209,39 @@ class Sersic(GSObject):
         self._trunc = float(trunc)
         self._gsparams = GSParams.check(gsparams)
 
+        if self._n < Sersic._minimum_n:
+            raise GalSimRangeError("Requested Sersic index is too small",
+                                   self._n, Sersic._minimum_n, Sersic._maximum_n)
+        if self._n > Sersic._maximum_n:
+            raise GalSimRangeError("Requested Sersic index is too large",
+                                   self._n, Sersic._minimum_n, Sersic._maximum_n)
+
+        if self._trunc < 0:
+            raise GalSimRangeError("Sersic trunc must be > 0", self._trunc, 0.)
+
         # Parse the radius options
         if half_light_radius is not None:
             if scale_radius is not None:
-                raise TypeError(
-                        "Only one of scale_radius or half_light_radius may be " +
-                        "specified for Spergel")
+                raise GalSimIncompatibleValuesError(
+                    "Only one of scale_radius or half_light_radius may be specified for Spergel",
+                    half_light_radius=half_light_radius, scale_radius=scale_radius)
             self._hlr = float(half_light_radius)
             if self._trunc == 0. or flux_untruncated:
                 self._flux_fraction = 1.
                 self._r0 = self._hlr / self.calculateHLRFactor()
             else:
                 if self._trunc <= math.sqrt(2.) * self._hlr:
-                    raise ValueError("Sersic trunc must be > sqrt(2) * half_light_radius")
-                self._r0 = _galsim.SersicTruncatedScale(self._n, self._hlr, self._trunc)
+                    raise GalSimRangeError("Sersic trunc must be > sqrt(2) * half_light_radius",
+                                           self._trunc, math.sqrt(2.) * self._hlr)
+                with convert_cpp_errors():
+                    self._r0 = _galsim.SersicTruncatedScale(self._n, self._hlr, self._trunc)
         elif scale_radius is not None:
             self._r0 = float(scale_radius)
             self._hlr = 0.
         else:
-            raise TypeError(
-                    "Either scale_radius or half_light_radius must be specified for Spergel")
+            raise GalSimIncompatibleValuesError(
+                "Either scale_radius or half_light_radius must be specified for Spergel",
+                half_light_radius=half_light_radius, scale_radius=scale_radius)
 
         if self._trunc > 0.:
             self._flux_fraction = self.calculateIntegratedFlux(self._trunc)
@@ -237,16 +254,19 @@ class Sersic(GSObject):
 
     def calculateIntegratedFlux(self, r):
         """Return the fraction of the total flux enclosed within a given radius, r"""
-        return _galsim.SersicIntegratedFlux(self._n, float(r)/self._r0)
+        with convert_cpp_errors():
+            return _galsim.SersicIntegratedFlux(self._n, float(r)/self._r0)
 
     def calculateHLRFactor(self):
         """Calculate the half-light-radius in units of the scale radius.
         """
-        return _galsim.SersicHLR(self._n, self._flux_fraction)
+        with convert_cpp_errors():
+            return _galsim.SersicHLR(self._n, self._flux_fraction)
 
     @lazy_property
     def _sbp(self):
-        return _galsim.SBSersic(self._n, self._r0, self._flux, self._trunc, self.gsparams._gsp)
+        with convert_cpp_errors():
+            return _galsim.SBSersic(self._n, self._r0, self._flux, self._trunc, self.gsparams._gsp)
 
     @property
     def n(self): return self._n

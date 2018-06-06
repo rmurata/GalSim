@@ -35,9 +35,11 @@ in the numpy version, feel free to post a feature request on our GitHub page.
 """
 
 import numpy as np
+
 from . import _galsim
 from .image import Image, ImageD, ImageCD
 from .bounds import BoundsI
+from .errors import GalSimValueError, convert_cpp_errors
 
 def fft2(a, shift_in=False, shift_out=False):
     """Compute the 2-dimensional discrete Fourier Transform.
@@ -77,19 +79,20 @@ def fft2(a, shift_in=False, shift_out=False):
     """
     s = a.shape
     if len(s) != 2:
-        raise ValueError("Input array must be 2D.  Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must be 2D.",s)
     M, N = s
     Mo2 = M // 2
     No2 = N // 2
 
     if M != Mo2*2 or N != No2*2:
-        raise ValueError("Input array must have even sizes. Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must have even sizes.",s)
 
     if a.dtype.kind == 'c':
         a = a.astype(np.complex128, copy=False)
         xim = ImageCD(a, xmin = -No2, ymin = -Mo2)
         kim = ImageCD(BoundsI(-No2,No2-1,-Mo2,Mo2-1))
-        _galsim.cfft(xim._image, kim._image, False, shift_in, shift_out)
+        with convert_cpp_errors():
+            _galsim.cfft(xim._image, kim._image, False, shift_in, shift_out)
         kar = kim.array
     else:
         a = a.astype(np.float64, copy=False)
@@ -102,7 +105,8 @@ def fft2(a, shift_in=False, shift_out=False):
 
         # Faster to start with rfft2 version
         rkim = ImageCD(BoundsI(0,No2,-Mo2,Mo2-1))
-        _galsim.rfft(xim._image, rkim._image, shift_in, shift_out)
+        with convert_cpp_errors():
+            _galsim.rfft(xim._image, rkim._image, shift_in, shift_out)
         # This only returns kx >= 0.  Fill out the full image.
         kar = np.empty( (M,N), dtype=np.complex128)
         rkar = rkim.array
@@ -162,13 +166,13 @@ def ifft2(a, shift_in=False, shift_out=False):
     """
     s = a.shape
     if len(s) != 2:
-        raise ValueError("Input array must be 2D.  Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must be 2D.",s)
     M,N = s
     Mo2 = M // 2
     No2 = N // 2
 
     if M != Mo2*2 or N != No2*2:
-        raise ValueError("Input array must have even sizes. Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must have even sizes.",s)
 
     if a.dtype.kind == 'c':
         a = a.astype(np.complex128, copy=False)
@@ -177,7 +181,8 @@ def ifft2(a, shift_in=False, shift_out=False):
         a = a.astype(np.float64, copy=False)
         kim = ImageD(a, xmin = -No2, ymin = -Mo2)
     xim = ImageCD(BoundsI(-No2,No2-1,-Mo2,Mo2-1))
-    _galsim.cfft(kim._image, xim._image, True, shift_in, shift_out)
+    with convert_cpp_errors():
+        _galsim.cfft(kim._image, xim._image, True, shift_in, shift_out)
     return xim.array
 
 
@@ -218,18 +223,19 @@ def rfft2(a, shift_in=False, shift_out=False):
     """
     s = a.shape
     if len(s) != 2:
-        raise ValueError("Input array must be 2D.  Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must be 2D.",s)
     M,N = s
     Mo2 = M // 2
     No2 = N // 2
 
     if M != Mo2*2 or N != No2*2:
-        raise ValueError("Input array must have even sizes. Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must have even sizes.",s)
 
     a = a.astype(np.float64, copy=False)
     xim = ImageD(a, xmin = -No2, ymin = -Mo2)
     kim = ImageCD(BoundsI(0,No2,-Mo2,Mo2-1))
-    _galsim.rfft(xim._image, kim._image, shift_in, shift_out)
+    with convert_cpp_errors():
+        _galsim.rfft(xim._image, kim._image, shift_in, shift_out)
     return kim.array
 
 
@@ -270,18 +276,19 @@ def irfft2(a, shift_in=False, shift_out=False):
     """
     s = a.shape
     if len(s) != 2:
-        raise ValueError("Input array must be 2D.  Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must be 2D.",s)
     M,No2 = s
     No2 -= 1  # s is (M,No2+1)
     Mo2 = M // 2
 
     if M != Mo2*2:
-        raise ValueError("Input array must have even sizes. Got shape=%s"%str(s))
+        raise GalSimValueError("Input array must have even sizes.",s)
 
     a = a.astype(np.complex128, copy=False)
     kim = ImageCD(a, xmin = 0, ymin = -Mo2)
     xim = ImageD(BoundsI(-No2,No2+1,-Mo2,Mo2-1))
-    _galsim.irfft(kim._image, xim._image, shift_in, shift_out)
+    with convert_cpp_errors():
+        _galsim.irfft(kim._image, xim._image, shift_in, shift_out)
     xim = xim.subImage(BoundsI(-No2,No2-1,-Mo2,Mo2-1))
     return xim.array
 

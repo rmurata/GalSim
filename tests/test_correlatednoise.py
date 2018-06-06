@@ -100,6 +100,14 @@ def test_uncorrelated_noise_zero_lag():
         do_pickle(ucn)
         do_pickle(cn)
 
+    assert_raises(TypeError, galsim.UncorrelatedNoise)
+    assert_raises(ValueError, galsim.UncorrelatedNoise, variance = -1.0)
+    assert_raises(TypeError, galsim.UncorrelatedNoise, 1, scale=1, wcs=galsim.PixelScale(3))
+    assert_raises(TypeError, galsim.UncorrelatedNoise, 1, wcs=1)
+    assert_raises(ValueError, galsim.UncorrelatedNoise, 1,
+                  wcs=galsim.FitsWCS('fits_files/tpv.fits'))
+    assert_raises(TypeError, galsim.UncorrelatedNoise, 1, rng=10)
+
 
 @timer
 def test_uncorrelated_noise_nonzero_lag():
@@ -506,7 +514,18 @@ def test_output_generation_basic():
     cn.drawImage(refim, scale=.18)
     # Generate a large image containing noise according to this function
     outimage = galsim.ImageD(xnoise_large.bounds, scale=0.18)
+    rng2 = ud.duplicate()
     outimage.addNoise(cn)
+
+    # Can also use applyTo syntax.
+    outimage2 = galsim.ImageD(xnoise_large.bounds, scale=0.18)
+    cn.rng.reset(rng2)
+    cn.applyTo(outimage2)
+    np.testing.assert_equal(outimage2.array, outimage.array)
+
+    assert_raises(TypeError, cn.applyTo, outimage2.array)
+    assert_raises(galsim.GalSimUndefinedBoundsError, cn.applyTo, galsim.Image())
+
     # Summed (average) CorrelatedNoises should be approximately equal to the input, so average
     # multiple CFs
     cn_2ndlevel = galsim.CorrelatedNoise(outimage, ud, correct_periodicity=False)
@@ -524,6 +543,15 @@ def test_output_generation_basic():
     np.testing.assert_array_almost_equal(
         testim.array, refim.array, decimal=2,
         err_msg="Generated noise field (basic) does not match input correlation properties.")
+
+    assert_raises(TypeError, galsim.CorrelatedNoise)
+    assert_raises(TypeError, galsim.CorrelatedNoise, outimage.array)
+    assert_raises(TypeError, galsim.CorrelatedNoise, outimage, scale=1, wcs=galsim.PixelScale(3))
+    assert_raises(TypeError, galsim.CorrelatedNoise, outimage, wcs=1)
+    assert_raises(ValueError, galsim.CorrelatedNoise, outimage,
+                  wcs=galsim.FitsWCS('fits_files/tpv.fits'))
+    assert_raises(TypeError, galsim.CorrelatedNoise, outimage, rng=10)
+    assert_raises(ValueError, galsim.CorrelatedNoise, outimage, x_interpolant='invalid')
 
 
 @timer
@@ -682,6 +710,36 @@ def test_copy():
     do_pickle(cn, drawNoise)
     do_pickle(cn)
 
+@timer
+def test_add():
+    """Adding two correlated noise objects, just adds their profiles.
+    """
+    rng = galsim.BaseDeviate(1234)
+    cosmos_scale = 0.03
+    ccn = galsim.getCOSMOSNoise(rng=rng)
+    print('ccn.variance = ',ccn.getVariance())
+    ucn1 = galsim.UncorrelatedNoise(variance=5.e-6, scale=cosmos_scale)
+    print('ucn1.variance = ',ucn1.getVariance())
+    ucn2 = galsim.UncorrelatedNoise(variance=5.e-6, scale=1.)
+    print('ucn2.variance = ',ucn2.getVariance())
+
+    sum = ccn + ucn1
+    print('sum.variance = ',sum.getVariance())
+    np.testing.assert_allclose(sum.getVariance(), ccn.getVariance() + ucn1.getVariance())
+
+    with assert_warns(galsim.GalSimWarning):
+        sum = ccn + ucn2
+    print('sum.variance = ',sum.getVariance())
+    np.testing.assert_allclose(sum.getVariance(), ccn.getVariance() + ucn2.getVariance())
+
+    diff = ccn - ucn1
+    print('diff.variance = ',diff.getVariance())
+    np.testing.assert_allclose(diff.getVariance(), ccn.getVariance() - ucn1.getVariance())
+
+    with assert_warns(galsim.GalSimWarning):
+        diff = ccn - ucn2
+    print('diff.variance = ',diff.getVariance())
+    np.testing.assert_allclose(diff.getVariance(), ccn.getVariance() - ucn2.getVariance())
 
 @timer
 def test_cosmos_and_whitening():
@@ -697,7 +755,7 @@ def test_cosmos_and_whitening():
     outimage = galsim.ImageD(3 * largeim_size + 11, 3 * largeim_size, scale=cosmos_scale)
     outimage.addNoise(ccn)  # Add the COSMOS noise
     # Then estimate correlation function from generated noise
-    cntest_correlated = galsim.CorrelatedNoise(outimage, ccn.rng)
+    cntest_correlated = galsim.CorrelatedNoise(outimage, ccn.rng, scale=cosmos_scale)
     # Check basic correlation function values of the 3x3 pixel region around (0,0)
     pos = galsim.PositionD(0., 0.)
     cf00 = ccn._profile.xValue(pos)
@@ -766,11 +824,12 @@ def test_cosmos_and_whitening():
     ccn_convolved = ccn_transformed.convolvedWith(galsim.Convolve([psf_ground, pix_ground]))
     # Reset the outimage, and set its pixel scale to now be the ground-based resolution
     # Also, check both odd-size and non-square here.  Both should be ok.
-    outimage = galsim.ImageD(3 * largeim_size + 1, 3 * largeim_size + 43, scale=scale)
+    outimage = galsim.ImageD(3 * largeim_size + 1, 3 * largeim_size + 43)
     # Add correlated noise
     outimage.addNoise(ccn_convolved)
     # Then whiten
-    #wht_variance = ccn_convolved.whitenImage(outimage)
+    # Note: Use alternate syntax here.  Equivalent to
+    #       wht_variance = ccn_convolved.whitenImage(outimage)
     wht_variance = outimage.whitenNoise(ccn_convolved)
     # Then test
     cntest_whitened = galsim.CorrelatedNoise(outimage, ccn.rng) # Get the correlation function
@@ -789,6 +848,9 @@ def test_cosmos_and_whitening():
             cftest / cftest00, 0., decimal=2,
             err_msg="Noise field generated by whitening rotated, sheared, magnified, convolved "+
             "COSMOS CorrelatedNoise does not have approximately zero interpixel covariances")
+
+    assert_raises(TypeError, ccn.whitenImage, outimage.array)
+    assert_raises(galsim.GalSimUndefinedBoundsError, ccn.whitenImage, galsim.Image())
 
 
 @timer
@@ -813,8 +875,7 @@ def test_symmetrizing():
     outimage = galsim.ImageD(symm_size_mult * largeim_size,
                              symm_size_mult * largeim_size, scale=cosmos_scale)
     outimage.addNoise(ccn)  # Add the COSMOS noise
-    # Then estimate correlation function from generated noise
-    cntest_correlated = galsim.CorrelatedNoise(outimage, ccn.rng)
+    outimage2 = outimage.copy()
     # Now apply 4-fold symmetry to the noise field, and check that its variance and covariances are
     # as expected (non-zero distance correlations should be symmetric)
     symmetrized_variance = ccn.symmetrizeImage(outimage, order=4)
@@ -838,6 +899,11 @@ def test_symmetrizing():
             (cftest[ind]/cftest[ind+1] - 1.)/symm_divide, 0., decimal=2,
             err_msg="Noise field generated by symmetrizing COSMOS CorrelatedNoise does not have "+
             "approximate 4-fold symmetry")
+
+    # If outimage doesn't have a scale set, then it uses the ccn scale.
+    outimage2.wcs = None
+    symmetrized_variance2 = ccn.symmetrizeImage(outimage2, order=4)
+    np.testing.assert_almost_equal(symmetrized_variance2, symmetrized_variance)
 
     # Now test symmetrizing, but having first expanded and sheared the COSMOS noise correlation.
     # Also we'll make the output image odd-sized, so as to ensure we test that option.
@@ -904,6 +970,12 @@ def test_symmetrizing():
             err_msg="Noise field generated by symmetrizing rotated, sheared, magnified, convolved "+
             "COSMOS CorrelatedNoise does not have approximate 4-fold symmetry")
 
+    assert_raises(TypeError, ccn.symmetrizeImage)
+    assert_raises(TypeError, ccn.symmetrizeImage, outimage.array)
+    assert_raises(ValueError, ccn.symmetrizeImage, galsim.Image(24,20))
+    assert_raises(ValueError, ccn.symmetrizeImage, outimage, order=2)
+    assert_raises(ValueError, ccn.symmetrizeImage, outimage, order=5)
+    assert_raises(galsim.GalSimUndefinedBoundsError, ccn.symmetrizeImage, galsim.Image())
 
 @timer
 def test_convolve_cosmos():
@@ -1085,7 +1157,7 @@ def test_uncorrelated_noise_tracking():
     # Convolving two objects with noise works fine, but accessing the resulting noise attribute
     # leads to a warning.
     conv_obj = galsim.Convolve(int_im, int_im)
-    with assert_warns(UserWarning):
+    with assert_warns(galsim.GalSimWarning):
         noise = conv_obj.noise
     # The noise should be correlated, not just the original UncorrelatedNoise
     assert isinstance(noise, galsim.correlatednoise._BaseCorrelatedNoise)
@@ -1114,6 +1186,14 @@ def test_variance_changes():
     cn = cn.withVariance(new_var)
     np.testing.assert_equal(cn.getVariance(), new_var,
                             err_msg='Failure to reset and then get variance for CorrelatedNoise')
+
+    # Also check some errors here
+    assert_raises(ValueError, cn.withVariance, -1.0)
+    assert_raises(OSError, galsim.getCOSMOSNoise, file_name='not_a_file')
+    assert_raises(OSError, galsim.getCOSMOSNoise, file_name='config_input/catalog.fits')
+    assert_raises(TypeError, galsim.getCOSMOSNoise, rng='invalid')
+    assert_raises(ValueError, galsim.getCOSMOSNoise, variance = -1.0)
+    assert_raises(ValueError, galsim.getCOSMOSNoise, x_interpolant='invalid')
 
 
 @timer
@@ -1171,7 +1251,7 @@ def test_cosmos_wcs():
         test_im.setZero()
         test_im.view(wcs=cn_orig.wcs).addNoise(cn_orig)
         cn_test = galsim.CorrelatedNoise(test_im)
-        cn_raw = galsim.CorrelatedNoise(test_im.view(scale=cosmos_scale))
+        cn_raw = galsim.CorrelatedNoise(test_im, wcs=galsim.PixelScale(cosmos_scale))
 
         # This time it is the raw cf values that should match.
         for xpos, ypos in zip((0., cosmos_scale, 0., cosmos_scale, cosmos_scale),
@@ -1231,6 +1311,7 @@ if __name__ == "__main__":
     test_output_generation_rotated()
     test_output_generation_magnified()
     test_copy()
+    test_add()
     test_cosmos_and_whitening()
     test_symmetrizing()
     test_convolve_cosmos()

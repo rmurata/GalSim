@@ -21,7 +21,6 @@ import numpy as np
 import math
 import os
 import sys
-import warnings
 
 import galsim
 from galsim_test_helpers import *
@@ -212,6 +211,12 @@ def test_cosmology():
         do_pickle(halo2)
         assert halo == halo2
 
+        assert_raises(ValueError, cosmo.Da, -0.1)
+        assert_raises(ValueError, cosmo.Da, 2.1, 2.3)
+        assert_raises(TypeError, galsim.NFWHalo, 1e15, 4, 1, cosmo=5)
+        assert_raises(TypeError, galsim.NFWHalo, 1e15, 4, 1, cosmo=cosmo, omega_m=wm)
+        assert_raises(TypeError, galsim.NFWHalo, 1e15, 4, 1, cosmo=cosmo, omega_lam=wl)
+
 
 @timer
 def test_shear_variance():
@@ -237,7 +242,7 @@ def test_shear_variance():
     test_ps = galsim.PowerSpectrum(e_power_function=pk_flat_lim, b_power_function=pk_flat_lim)
     # get shears on 500x500 grid with spacing 0.1 degree
     rng2 = rng.duplicate()
-    assert_raises(RuntimeError, test_ps.nRandCallsForBuildGrid)
+    assert_raises(galsim.GalSimError, test_ps.nRandCallsForBuildGrid)
     g1, g2 = test_ps.buildGrid(grid_spacing=grid_size/ngrid, ngrid=ngrid, rng=rng,
                                units=galsim.degrees)
     assert g1.shape == (ngrid, ngrid)
@@ -506,11 +511,11 @@ def test_shear_variance():
             "Incorrect shear variance post-interpolation"
 
     # Warn for accessing values outside of valid bounds (and not periodic)
-    assert_warns(UserWarning, test_ps.getShear, pos=(max*2, 0), units='deg')
-    assert_warns(UserWarning, test_ps.getShear, pos=(max*2, 0), reduced=False, units='deg')
-    assert_warns(UserWarning, test_ps.getConvergence, pos=(max*2, 0), units='deg')
-    assert_warns(UserWarning, test_ps.getMagnification, pos=(max*2, 0), units='deg')
-    assert_warns(UserWarning, test_ps.getLensing, pos=(max*2, 0), units='deg')
+    assert_warns(galsim.GalSimWarning, test_ps.getShear, pos=(max*2, 0), units='deg')
+    assert_warns(galsim.GalSimWarning, test_ps.getShear, pos=(max*2, 0), reduced=False, units='deg')
+    assert_warns(galsim.GalSimWarning, test_ps.getConvergence, pos=(max*2, 0), units='deg')
+    assert_warns(galsim.GalSimWarning, test_ps.getMagnification, pos=(max*2, 0), units='deg')
+    assert_warns(galsim.GalSimWarning, test_ps.getLensing, pos=(max*2, 0), units='deg')
 
 
 @timer
@@ -631,6 +636,13 @@ def test_shear_get():
     # build the grid
     grid_spacing = 17.
     ngrid = 100
+
+    # Before calling buildGrid, these are invalid
+    assert_raises(galsim.GalSimError, my_ps.getShear, galsim.PositionD(0,0))
+    assert_raises(galsim.GalSimError, my_ps.getConvergence, galsim.PositionD(0,0))
+    assert_raises(galsim.GalSimError, my_ps.getMagnification, galsim.PositionD(0,0))
+    assert_raises(galsim.GalSimError, my_ps.getLensing, galsim.PositionD(0,0))
+
     g1, g2, kappa = my_ps.buildGrid(grid_spacing = grid_spacing, ngrid = ngrid,
                                     get_convergence = True)
     min = (-ngrid/2 + 0.5) * grid_spacing
@@ -676,8 +688,7 @@ def test_shear_get():
                                    (g1_r[0,0], g2_r[0,0], mu[0,0]))
 
     # Test outside of bounds
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
+    with assert_warns(galsim.GalSimWarning):
         np.testing.assert_almost_equal(my_ps.getShear((5000,5000)), (0,0))
         np.testing.assert_almost_equal(my_ps.getShear((5000,5000), reduced=False), (0,0))
         np.testing.assert_almost_equal(my_ps.getConvergence((5000,5000)), 0)
@@ -842,17 +853,24 @@ def test_tabulated():
     assert_raises(ValueError, galsim.LookupTable, (0.,1.,2.), (0.,1.,2.), f_log=True)
     assert_raises(ValueError, galsim.LookupTable, (0.,1.,2.), (0.,1.,2.), x_log=True, f_log=True)
 
+    # Negative power is invalid.
+    neg_power = galsim.LookupTable(k_arr, np.cos(k_arr))
+    print('neg_power = ',neg_power)
+    with assert_raises(galsim.GalSimError):
+        negps = galsim.PowerSpectrum(neg_power)
+        negps.buildGrid(grid_spacing=1.7, ngrid=10)
+
     # Check some invalid PowerSpectrum parameters
-    assert_raises(AttributeError, galsim.PowerSpectrum)
-    assert_raises(AttributeError, galsim.PowerSpectrum, delta2=True)
-    assert_raises(AttributeError, galsim.PowerSpectrum, delta2=True, units='radians')
+    assert_raises(ValueError, galsim.PowerSpectrum)
+    assert_raises(ValueError, galsim.PowerSpectrum, delta2=True)
+    assert_raises(ValueError, galsim.PowerSpectrum, delta2=True, units='radians')
     assert_raises(ValueError, galsim.PowerSpectrum, e_power_function=tab, units='inches')
     assert_raises(ValueError, galsim.PowerSpectrum, e_power_function=tab, units=True)
     assert_raises(ValueError, galsim.PowerSpectrum, e_power_function='not_a_file')
     assert_raises(ValueError, galsim.PowerSpectrum, b_power_function='not_a_file')
-    assert_raises(ValueError, ps_tab.buildGrid)
-    assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7)
-    assert_raises(ValueError, ps_tab.buildGrid, ngrid=10)
+    assert_raises(TypeError, ps_tab.buildGrid)
+    assert_raises(TypeError, ps_tab.buildGrid, grid_spacing=1.7)
+    assert_raises(TypeError, ps_tab.buildGrid, ngrid=10)
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10.5)
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10, kmin_factor=2.5)
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10, kmax_factor=1.5)
@@ -860,6 +878,13 @@ def test_tabulated():
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10, units='inches')
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10, units=True)
     assert_raises(ValueError, ps_tab.buildGrid, grid_spacing=1.7, ngrid=10, bandlimit='none')
+    assert_raises(TypeError, ps_tab.getShear)
+    assert_raises(TypeError, ps_tab.getShear, pos=())
+    assert_raises(TypeError, ps_tab.getShear, pos=3)
+    assert_raises(TypeError, ps_tab.getShear, pos=(3,))
+    assert_raises(TypeError, ps_tab.getShear, pos=(3,4,5))
+    assert_raises(ValueError, ps_tab.getShear, pos=(3,4), units='invalid')
+    assert_raises(ValueError, ps_tab.getShear, pos=(3,4), units=17)
 
     # check that when calling LookupTable, you can provide a scalar, list, tuple or array
     tab = galsim.LookupTable(k_arr, p_arr)
@@ -949,6 +974,11 @@ def test_kappa_gauss():
         kr_testE[np.ix_(icent, icent)], np.zeros((ngrid // 2, ngrid // 2)), decimal=3,
         err_msg="Reconstructed kappaE is non-zero at greater than 3 decimal places for rotated "+
         "shear field.")
+
+    assert_raises(TypeError, galsim.lensing_ps.kappaKaiserSquires, g1=0.3, g2=0.1)
+    assert_raises(ValueError, galsim.lensing_ps.kappaKaiserSquires, g1=g1, g2=g2[:50,:50])
+    assert_raises(NotImplementedError, galsim.lensing_ps.kappaKaiserSquires,
+                  g1=g1[:,:50], g2=g2[:,:50])
 
 
 @timer
@@ -1286,6 +1316,13 @@ def test_periodic():
     np.testing.assert_almost_equal(np.var(mu_shift), np.var(mu), decimal=8,
                                    err_msg='Magnification variance altered by periodic interpolation')
 
+    # If image is too small, can't use periodic boundaries.
+    ps.buildGrid(ngrid=5, grid_spacing=0.1, units=galsim.degrees,
+                 rng=galsim.UniformDeviate(314159), interpolant='nearest',
+                 kmin_factor=3., kmax_factor=1., get_convergence=True)
+    with assert_raises(galsim.GalSimError):
+        ps.getShear(pos=(x.flatten(),y.flatten()), units=galsim.degrees,
+                    reduced=False, periodic=True)
 
 @timer
 def test_bandlimit():
@@ -1335,6 +1372,9 @@ def test_psr():
                      galsim.lensing_ps.PowerSpectrumRealizer(100, 0.005, None, pb),
                      galsim.lensing_ps.PowerSpectrumRealizer(100, 0.005, pb, pe)]
     all_obj_diff(diff_psr_list)
+
+    with assert_raises(TypeError):
+        psr(gd=galsim.BaseDeviate(1234))
 
 
 @timer

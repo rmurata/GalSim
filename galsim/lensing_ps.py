@@ -20,6 +20,7 @@ The "lensing engine" for drawing shears from some power spectrum.
 """
 
 import numpy as np
+
 from .angle import arcsec, AngleUnit
 from .position import PositionD, PositionI
 from .bounds import BoundsD, BoundsI
@@ -30,7 +31,8 @@ from .random import GaussianDeviate
 from .table import LookupTable
 from . import utilities
 from . import integ
-from . import _galsim
+from .errors import GalSimError, GalSimValueError, GalSimIncompatibleValuesError
+from .errors import GalSimNotImplementedError, galsim_warn
 
 def theoryToObserved(gamma1, gamma2, kappa):
     """Helper function to convert theoretical lensing quantities to observed ones.
@@ -168,8 +170,9 @@ class PowerSpectrum(object):
     def __init__(self, e_power_function=None, b_power_function=None, delta2=False, units=arcsec):
         # Check that at least one power function is not None
         if e_power_function is None and b_power_function is None:
-            raise AttributeError(
-                "At least one of e_power_function or b_power_function must be provided.")
+            raise GalSimIncompatibleValuesError(
+                "At least one of e_power_function or b_power_function must be provided.",
+                e_power_function=e_power_function, b_power_function=b_power_function)
 
         self.e_power_function = e_power_function
         self.b_power_function = b_power_function
@@ -189,7 +192,8 @@ class PowerSpectrum(object):
             # if the string is invalid, this raises a reasonable error message.
             units = AngleUnit.from_name(units)
         if not isinstance(units, AngleUnit):
-            raise ValueError("units must be either an AngleUnit or a string")
+            raise GalSimValueError("units must be either an AngleUnit or a string", units,
+                                   ('arcsec', 'arcmin', 'degree', 'hour', 'radian'))
 
         if units == arcsec:
             self.scale = 1
@@ -229,7 +233,8 @@ class PowerSpectrum(object):
             # if the string is invalid, this raises a reasonable error message.
             units = AngleUnit.from_name(units)
         if not isinstance(units, AngleUnit):
-            raise ValueError("units must be either an AngleUnit or a string")
+            raise GalSimValueError("units must be either an AngleUnit or a string", units,
+                                   ('arcsec', 'arcmin', 'degree', 'hour', 'radian'))
         return units / arcsec
 
     def _get_bandlimit_func(self, bandlimit):
@@ -240,7 +245,8 @@ class PowerSpectrum(object):
         elif bandlimit is None:
             return lambda k, kmax: 1.0
         else:
-            raise ValueError("Unrecognized option for band limit!")
+            raise GalSimValueError("Unrecognized option for band limit!", bandlimit,
+                                   (None, 'soft', 'hard'))
 
     def _get_pk(self, power_function, k_max, bandlimit_func):
         if power_function is None:
@@ -263,7 +269,7 @@ class PowerSpectrum(object):
         else:
             return lambda k : power_function(k) * bandlimit_func(k, k_max)
 
-    def buildGrid(self, grid_spacing=None, ngrid=None, rng=None, interpolant=None,
+    def buildGrid(self, grid_spacing, ngrid, rng=None, interpolant=None,
                   center=PositionD(0,0), units=arcsec, get_convergence=False,
                   kmax_factor=1, kmin_factor=1, bandlimit="hard", variance=None):
         """Generate a realization of the current power spectrum on the specified grid.
@@ -459,26 +465,24 @@ class PowerSpectrum(object):
         @returns the tuple (g1,g2[,kappa]), where each is a 2-d NumPy array and kappa is included
                  iff `get_convergence` is set to True.
         """
-        # Check problem cases for regular grid of points
-        if grid_spacing is None or ngrid is None:
-            raise ValueError("Both a spacing and a size are required for buildGrid.")
         # Check for validity of integer values
         if not isinstance(ngrid, int):
             if ngrid != int(ngrid):
-                raise ValueError("ngrid must be an integer")
+                raise GalSimValueError("ngrid must be an integer", ngrid)
             ngrid = int(ngrid)
         if not isinstance(kmin_factor, int):
             if kmin_factor != int(kmin_factor):
-                raise ValueError("kmin_factor must be an integer")
+                raise GalSimValueError("kmin_factor must be an integer", kmin_factor)
             kmin_factor = int(kmin_factor)
         if not isinstance(kmax_factor, int):
             if kmax_factor != int(kmax_factor):
-                raise ValueError("kmax_factor must be an integer")
+                raise GalSimValueError("kmax_factor must be an integer", kmax_factor)
             kmax_factor = int(kmax_factor)
 
         # Check if center is a PositionD
         if not isinstance(center, PositionD):
-            raise ValueError("center argument for buildGrid must be a PositionD instance")
+            raise GalSimValueError("center argument for buildGrid must be a PositionD instance",
+                                   center)
 
         # Automatically convert units to arcsec at the outset, then forget about it.  This is
         # because PowerSpectrum by default wants to work in arsec, and all power functions are
@@ -560,7 +564,7 @@ class PowerSpectrum(object):
         (e.g. when calling the function through a Proxy object).
         """
         if not hasattr(self,'ngrid_tot'):
-            raise RuntimeError("BuildGrid has not been called yet.")
+            raise GalSimError("BuildGrid has not been called yet.")
         ntot = 0
         # cf. PowerSpectrumRealizer._generate_power_array
         temp = 2 * np.product( (self.ngrid_tot, self.ngrid_tot//2 +1 ) )
@@ -586,11 +590,10 @@ class PowerSpectrum(object):
                     pf = utilities.math_eval('lambda k : ' + pf)
                     pf(1.0)
                 except Exception as e:
-                    raise ValueError(
-                        "String %s must either be a valid filename or something that "%pf_str+
-                        "can eval to a function of k.\n"+
-                        "Input provided: {0}\n".format(origpf)+
-                        "Caught error: {0}".format(e))
+                    raise GalSimValueError(
+                        "String {0} must either be a valid filename or something that "
+                        "can eval to a function of k.\n"
+                        "Caught error: {1}".format(pf_str, e), origpf)
 
         # Check that the function is sane.
         # Note: Only try tests below if it's not a LookupTable.
@@ -764,13 +767,13 @@ class PowerSpectrum(object):
         Utility function to wrap an input image with some number of border pixels.  By default, the
         number of border pixels is 7, but this function works as long as it's less than the size of
         the input image itself.  This function is used for periodic interpolation by the
-        getShear() and other methods, but eventually if we make a 2d LookupTable-type class, this
-        should become a method of that class.
+        getShear() and other methods, but eventually if we upgrade LookupTable2D to allow
+        Lanczos interpolation, we should ust that.  cf. Issue #751
         """
         # We should throw an exception if the image is smaller than 'border', since at this point
         # this process doesn't make sense.
         if im.bounds.xmax - im.bounds.xmin < border:
-            raise RuntimeError("Periodic wrapping does not work with images this small!")
+            raise GalSimError("Periodic wrapping does not work with images this small!")
         expanded_bounds = im.bounds.withBorder(border)
         # Make new image with those bounds.
         im_new = ImageD(expanded_bounds, scale=self.grid_spacing)
@@ -907,7 +910,7 @@ class PowerSpectrum(object):
         If the input `pos` is given a list/array of positions, they are NumPy arrays.
         """
         if not hasattr(self, 'im_g1'):
-            raise RuntimeError("PowerSpectrum.buildGrid must be called before getShear")
+            raise GalSimError("PowerSpectrum.buildGrid must be called before getShear")
 
         # Convert to numpy arrays for internal usage:
         pos_x, pos_y = utilities._convertPositions(pos, units, 'getShear')
@@ -969,11 +972,9 @@ class PowerSpectrum(object):
             if not periodic:
                 # We're not treating this as a periodic box, so issue a warning and set the
                 # shear to zero for positions that are outside the original grid.
-                import warnings
-                warnings.warn(
-                    "Warning: position (%f,%f) not within the bounds "%(x,y) +
-                    "of the gridded shear values: " + str(self.bounds) +
-                    ".  Returning a shear of (0,0) for this point.")
+                galsim_warn(
+                    "Warning: position (%f,%f) not within the bounds (%s) of the gridded shear "
+                    "values.  Returning a shear of (0,0) for this point."%(x,y,self.bounds))
                 return 0., 0.
             else:
                 # Treat this as a periodic box.
@@ -1021,7 +1022,7 @@ class PowerSpectrum(object):
         If the input `pos` is given a list/array of positions, kappa is a NumPy array.
         """
         if not hasattr(self, 'im_kappa'):
-            raise RuntimeError("PowerSpectrum.buildGrid must be called before getConvergence")
+            raise GalSimError("PowerSpectrum.buildGrid must be called before getConvergence")
 
         # Convert to numpy arrays for internal usage:
         pos_x, pos_y = utilities._convertPositions(pos, units, 'getConvergence')
@@ -1067,11 +1068,10 @@ class PowerSpectrum(object):
         # Check that the position is in the bounds of the interpolated image
         if not self.bounds.includes(pos):
             if not periodic:
-                import warnings
-                warnings.warn(
-                    "Warning: position (%f,%f) not within the bounds "%(x,y) +
-                    "of the gridded convergence values: " + str(self.bounds) +
-                    ".  Returning a convergence of 0 for this point.")
+                galsim_warn(
+                    "Warning: position (%f,%f) not within the bounds (%s) of the gridded "
+                    "convergence values. Returning a convergence of 0 for this point."%(
+                    x,y,self.bounds))
                 return 0.
             else:
                 # Treat this as a periodic box.
@@ -1118,7 +1118,7 @@ class PowerSpectrum(object):
         If the input `pos` is given a list/array of positions, mu is a NumPy array.
         """
         if not hasattr(self, 'im_kappa'):
-            raise RuntimeError("PowerSpectrum.buildGrid must be called before getMagnification")
+            raise GalSimError("PowerSpectrum.buildGrid must be called before getMagnification")
 
         # Convert to numpy arrays for internal usage:
         pos_x, pos_y = utilities._convertPositions(pos, units, 'getMagnification')
@@ -1166,11 +1166,10 @@ class PowerSpectrum(object):
         # Check that the position is in the bounds of the interpolated image
         if not self.bounds.includes(pos):
             if not periodic:
-                import warnings
-                warnings.warn(
-                    "Warning: position (%f,%f) not within the bounds "%(x,y) +
-                    "of the gridded convergence values: " + str(self.bounds) +
-                    ".  Returning a magnification of 1 for this point.")
+                galsim_warn(
+                    "Warning: position (%f,%f) not within the bounds (%s) of the gridded "
+                    "convergence values. Returning a magnification of 1 for this point."%(
+                    x,y,self.bounds))
                 return 1.
             else:
                 # Treat this as a periodic box.
@@ -1219,7 +1218,7 @@ class PowerSpectrum(object):
         If the input `pos` is given a list/array of positions, they are NumPy arrays.
         """
         if not hasattr(self, 'im_kappa'):
-            raise RuntimeError("PowerSpectrum.buildGrid must be called before getLensing")
+            raise GalSimError("PowerSpectrum.buildGrid must be called before getLensing")
 
         # Convert to numpy arrays for internal usage:
         pos_x, pos_y = utilities._convertPositions(pos, units, 'getLensing')
@@ -1274,11 +1273,9 @@ class PowerSpectrum(object):
         # Check that the position is in the bounds of the interpolated image
         if not self.bounds.includes(pos):
             if not periodic:
-                import warnings
-                warnings.warn(
-                    "Warning: position (%f,%f) not within the bounds "%(x,y) +
-                    "of the gridded values: " + str(self.bounds) +
-                    ".  Returning 0 for lensing observables at this point.")
+                galsim_warn(
+                    "Warning: position (%f,%f) not within the bounds (%s) of the gridded "
+                    "values. Returning 0 for lensing observables at this point."%(x,y,self.bounds))
                 return 0., 0., 1.
             else:
                 # Treat this as a periodic box.
@@ -1475,20 +1472,13 @@ class PowerSpectrumRealizer(object):
 
         # Fudge the value at k=0, so we don't have to evaluate power there
         k[0,0] = k[1,0]
-        # Raise a clear exception for LookupTable that are not defined on the full k range!
-        if isinstance(power_function, LookupTable):
-            mink = np.min(k)
-            maxk = np.max(k)
-            if mink < power_function.x_min or maxk > power_function.x_max:
-                raise ValueError(
-                    "LookupTable P(k) is not defined for full k range on grid, %f<k<%f"%(mink,maxk))
         P_k = np.empty_like(k)
         P_k[:,:] = power_function(k)
 
         # Now fix the k=0 value of power to zero
         P_k[0,0] = type(P_k[0,1])(0.)
         if np.any(P_k < 0):
-            raise ValueError("Negative power found for some values of k!")
+            raise GalSimError("Negative power found for some values of k!")
 
         power_array[self.iky, self.ikx] = P_k
         power_array[self.ikyn, self.ikx] = P_k[self.ikyp, self.ikx]
@@ -1534,12 +1524,12 @@ def kappaKaiserSquires(g1, g2):
     prior to input.
     """
     # Checks on inputs
-    if not isinstance(g1, np.ndarray) and isinstance(g2, np.ndarray):
-        raise TypeError("Input g1 and g2 must be galsim Image or NumPy arrays.")
+    if not (isinstance(g1, np.ndarray) and isinstance(g2, np.ndarray)):
+        raise TypeError("Input g1 and g2 must be NumPy arrays.")
     if g1.shape != g2.shape:
-        raise ValueError("Input g1 and g2 must be the same shape.")
+        raise GalSimIncompatibleValuesError("Input g1 and g2 must be the same shape.", g1=g1, g2=g2)
     if g1.shape[0] != g1.shape[1]:
-        raise NotImplementedError("Non-square input shear grids not supported.")
+        raise GalSimNotImplementedError("Non-square input shear grids not supported.")
 
     # Then setup the kx, ky grids
     kx, ky = utilities.kxky(g1.shape)

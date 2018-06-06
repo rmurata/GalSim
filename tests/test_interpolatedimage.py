@@ -163,6 +163,7 @@ def test_roundtrip():
     assert_raises(ValueError, galsim.Interpolant.from_name, 'lanczos3A')
     assert_raises(ValueError, galsim.Interpolant.from_name, 'lanczosF')
     assert_raises(ValueError, galsim.Interpolant.from_name, 'lanzos')
+    assert_raises(NotImplementedError, galsim.Interpolant)
 
 @timer
 def test_fluxnorm():
@@ -229,36 +230,49 @@ def test_fluxnorm():
 def test_exceptions():
     """Test failure modes for InterpolatedImage class.
     """
-    # What if it receives as input something that is not an Image? Give it a GSObject to check.
-    g = galsim.Gaussian(sigma=1.)
-    with assert_raises((ValueError, AttributeError)):
-        galsim.InterpolatedImage(g)
-    # What if Image does not have a scale set, but scale keyword is not specified?
-    im = galsim.ImageF(5, 5)
-    with assert_raises(ValueError):
-        galsim.InterpolatedImage(im)
-    # Image must have bounds defined
-    im = galsim.ImageF()
-    im.scale = 1.
-    with assert_raises(ValueError):
-        galsim.InterpolatedImage(im)
-    # Weird flux normalization
-    im = galsim.ImageF(5, 5, scale=1.)
-    with assert_raises(ValueError):
-        galsim.InterpolatedImage(im, normalization = 'foo')
-    # scale and WCS
-    with assert_raises(TypeError):
-        galsim.InterpolatedImage(im, wcs = galsim.PixelScale(1.), scale=1.)
-    # weird WCS
-    with assert_raises(TypeError):
-        galsim.InterpolatedImage(im, wcs = 1.)
-    # Weird interpolant - give it something random like a GSObject
-    with assert_raises(Exception):
-        galsim.InterpolatedImage(im, x_interpolant = g)
-    # Image has wrong type
-    im = galsim.ImageI(5, 5)
-    with assert_raises(ValueError):
-        galsim.InterpolatedImage(im)
+    # Check that provided image has valid bounds
+    with assert_raises(galsim.GalSimUndefinedBoundsError):
+        galsim.InterpolatedImage(image=galsim.ImageF(scale=1.))
+
+    # Scale must be set
+    with assert_raises(galsim.GalSimIncompatibleValuesError):
+        galsim.InterpolatedImage(image=galsim.ImageF(5, 5))
+
+    # Image must be real type (F or D)
+    with assert_raises(galsim.GalSimValueError):
+        galsim.InterpolatedImage(image=galsim.ImageI(5, 5, scale=1))
+
+    # Image must have non-zero flux
+    with assert_raises(galsim.GalSimValueError):
+        galsim.InterpolatedImage(image=galsim.ImageF(5, 5, scale=1, init_value=0.))
+
+    # Can't shoot II with SincInterpolant
+    ii = galsim.InterpolatedImage(image=galsim.ImageF(5, 5, scale=1, init_value=1.),
+                                  x_interpolant='sinc')
+    with assert_raises(galsim.GalSimError):
+        ii.drawImage(method='phot')
+    with assert_raises(galsim.GalSimError):
+        ii.shoot(n_photons=3)
+
+    # Check types of inputs
+    im = galsim.ImageF(5, 5, scale=1., init_value=10.)
+    assert_raises(TypeError, galsim.InterpolatedImage, image=im.array)
+    assert_raises(TypeError, galsim.InterpolatedImage, im, wcs=galsim.PixelScale(1.), scale=1.)
+    assert_raises(TypeError, galsim.InterpolatedImage, im, wcs=1.)
+    assert_raises(TypeError, galsim.InterpolatedImage, im, pad_image=im.array)
+    assert_raises(TypeError, galsim.InterpolatedImage, im, noise_pad_size=33)
+    assert_raises(TypeError, galsim.InterpolatedImage, im, noise_pad=33)
+
+    # Other invalid values:
+    assert_raises(ValueError, galsim.InterpolatedImage, im, normalization='invalid')
+    assert_raises(ValueError, galsim.InterpolatedImage, im, x_interpolant='invalid')
+    assert_raises(ValueError, galsim.InterpolatedImage, im, k_interpolant='invalid')
+    assert_raises(ValueError, galsim.InterpolatedImage, im, pad_image=galsim.ImageI(25,25))
+    assert_raises(ValueError, galsim.InterpolatedImage, im, pad_factor=0.)
+    assert_raises(ValueError, galsim.InterpolatedImage, im, pad_factor=-1.)
+    assert_raises(ValueError, galsim.InterpolatedImage, im, noise_pad_size=33, noise_pad=im.wcs)
+    assert_raises(ValueError, galsim.InterpolatedImage, im, noise_pad_size=33, noise_pad=-1.)
+    assert_raises(ValueError, galsim.InterpolatedImage, im, noise_pad_size=-33, noise_pad=1.)
 
 
 @timer
@@ -1096,8 +1110,6 @@ def test_stepk_maxk():
 def test_kroundtrip():
     """ Test that GSObjects `a` and `b` are the same when b = InterpolatedKImage(a.drawKImage)
     """
-    import warnings
-
     a = final
     kim_a = a.drawKImage()
     b = galsim.InterpolatedKImage(kim_a)
@@ -1164,7 +1176,7 @@ def test_kroundtrip():
     np.testing.assert_almost_equal(b.maxk, c.maxk)
 
     # Smaller stepk is overridden.
-    with assert_warns(UserWarning):
+    with assert_warns(galsim.GalSimWarning):
         d = galsim.InterpolatedKImage(kim_a, stepk=0.5*b.stepk)
     np.testing.assert_almost_equal(b.stepk, d.stepk)
     np.testing.assert_almost_equal(b.maxk, d.maxk)
@@ -1187,6 +1199,41 @@ def test_kroundtrip():
     # Fails at 6th decimal.
     np.testing.assert_array_almost_equal(a_conv_c_img.array, b_conv_c_img.array, 5,
                                          "Convolution of InterpolatedKImage drawn incorrectly.")
+
+
+@timer
+def test_kexceptions():
+    """Test failure modes for InterpolatedKImage class.
+    """
+    # Check that provided image has valid bounds
+    with assert_raises(galsim.GalSimUndefinedBoundsError):
+        galsim.InterpolatedKImage(kimage=galsim.ImageCD(scale=1.))
+
+    # Image must be complex type (CF or CD)
+    with assert_raises(galsim.GalSimValueError):
+        galsim.InterpolatedKImage(kimage=galsim.ImageD(5, 5, scale=1))
+
+    # Check types of inputs
+    im = galsim.ImageCD(5, 5, scale=1., init_value=10.)
+    assert_raises(TypeError, galsim.InterpolatedKImage)
+    assert_raises(TypeError, galsim.InterpolatedKImage, kimage=im.array)
+    assert_raises(TypeError, galsim.InterpolatedKImage, real_kimage=im.real, imag_kimage=4)
+    assert_raises(TypeError, galsim.InterpolatedKImage, real_kimage=3, imag_kimage=im.imag)
+    assert_raises(TypeError, galsim.InterpolatedKImage, kimage=im,
+                  real_kimage=im.real, imag_kimage=im.imag)
+
+    # Other invalid values:
+    assert_raises(ValueError, galsim.InterpolatedKImage, im, k_interpolant='invalid')
+    assert_raises(ValueError, galsim.InterpolatedKImage, real_kimage=im.real)
+    assert_raises(ValueError, galsim.InterpolatedKImage, imag_kimage=im.imag)
+    assert_raises(ValueError, galsim.InterpolatedKImage, real_kimage=im, imag_kimage=im)
+    assert_raises(ValueError, galsim.InterpolatedKImage, real_kimage=im.real,
+                  imag_kimage=galsim.ImageD(4,4,scale=1.))
+    assert_raises(ValueError, galsim.InterpolatedKImage, real_kimage=im.real,
+                  imag_kimage=galsim.ImageD(5,5,scale=2.))
+    assert_raises(ValueError, galsim.InterpolatedKImage,
+                  kimage=galsim.ImageCD(5, 5, wcs=galsim.JacobianWCS(2.1, 0.3, -0.4, 2.3)))
+
 
 @timer
 def test_multihdu_readin():

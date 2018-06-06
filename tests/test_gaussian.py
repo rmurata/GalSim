@@ -29,22 +29,6 @@ imgdir = os.path.join(path, "SBProfile_comparison_images") # Directory containin
                                                            # images.
 
 
-# These are the default GSParams used when unspecified.  We'll check that specifying
-# these explicitly produces the same results.
-default_params = galsim.GSParams(
-        minimum_fft_size = 128,
-        maximum_fft_size = 4096,
-        folding_threshold = 5.e-3,
-        maxk_threshold = 1.e-3,
-        kvalue_accuracy = 1.e-5,
-        xvalue_accuracy = 1.e-5,
-        shoot_accuracy = 1.e-5,
-        realspace_relerr = 1.e-4,
-        realspace_abserr = 1.e-6,
-        integration_relerr = 1.e-6,
-        integration_abserr = 1.e-8)
-
-
 @timer
 def test_gaussian():
     """Test the generation of a specific Gaussian profile against a known result.
@@ -121,11 +105,16 @@ def test_gaussian():
     assert_raises(TypeError, galsim.Gaussian, half_light_radius=1, fwhm=2)
     assert_raises(TypeError, galsim.Gaussian, sigma=3, fwhm=2)
     assert_raises(TypeError, galsim.Gaussian, sigma=3, half_light_radius=1)
+    # Or none.
+    assert_raises(TypeError, galsim.Gaussian)
 
     # Finally, test the noise property for things that don't have any noise set.
     assert gauss.noise is None
     # And accessing the attribute from the class should indicate that it is a lazyproperty
     assert 'lazy_property' in str(galsim.GSObject._noise)
+
+    # And check that trying to use GSObject directly is an error.
+    assert_raises(NotImplementedError, galsim.GSObject)
 
 
 @timer
@@ -151,6 +140,22 @@ def test_gaussian_properties():
         gauss = galsim.Gaussian(flux=inFlux, sigma=2.)
         outFlux = gauss.flux
         np.testing.assert_almost_equal(outFlux, inFlux)
+
+    # Check some valid and invalid ways to pass arguments to xValue
+    # Same code applies to kValue and others, so just do this one.
+    assert gauss.xValue(cen.x, cen.y) == gauss.xValue(cen)
+    assert gauss.xValue(x=cen.x, y=cen.y) == gauss.xValue(cen)
+    assert gauss.xValue( (cen.x, cen.y) ) == gauss.xValue(cen)
+    assert_raises(TypeError, gauss.xValue, cen.x)
+    assert_raises(TypeError, gauss.xValue, x=cen.x)
+    assert_raises(TypeError, gauss.xValue, cen.x, y=cen.y)
+    assert_raises(TypeError, gauss.xValue, dx=cen.x, dy=cen.y)
+    assert_raises(TypeError, gauss.xValue, dx=cen.x, y=cen.y)
+    assert_raises(TypeError, gauss.xValue, x=cen.x, dy=cen.y)
+    assert_raises(TypeError, gauss.xValue, cen.x, cen.y, cen.y)
+    assert_raises(TypeError, gauss.xValue, cen.x, cen.y, invalid=True)
+    assert_raises(TypeError, gauss.xValue, pos=cen)
+
 
 
 @timer

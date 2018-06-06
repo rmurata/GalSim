@@ -23,6 +23,7 @@ from .gsparams import GSParams
 from .gsobject import GSObject
 from .position import PositionD
 from .utilities import lazy_property, doc_inherit
+from .errors import GalSimRangeError, convert_cpp_errors
 
 class RandomWalk(GSObject):
     """
@@ -124,9 +125,10 @@ class RandomWalk(GSObject):
         fluxper=self._flux/self._npoints
 
         for p in self._points:
-            d = _galsim.SBDeltaFunction(fluxper, self.gsparams._gsp)
-            d = _galsim.SBTransform(d, 1.0, 0.0, 0.0, 1.0, _galsim.PositionD(p[0],p[1]), 1.0,
-                                    self.gsparams._gsp)
+            with convert_cpp_errors():
+                d = _galsim.SBDeltaFunction(fluxper, self.gsparams._gsp)
+                d = _galsim.SBTransform(d, 1.0, 0.0, 0.0, 1.0, _galsim.PositionD(p[0],p[1]), 1.0,
+                                        self.gsparams._gsp)
             deltas.append(d)
         return deltas
 
@@ -135,7 +137,8 @@ class RandomWalk(GSObject):
 
     @lazy_property
     def _sbp(self):
-        return _galsim.SBAdd(self.deltas, self.gsparams._gsp)
+        with convert_cpp_errors():
+            return _galsim.SBAdd(self.deltas, self.gsparams._gsp)
 
     @property
     def input_half_light_radius(self):
@@ -195,17 +198,15 @@ class RandomWalk(GSObject):
         """
         from .random import BaseDeviate
         if not isinstance(self._rng, BaseDeviate):
-            raise TypeError("rng must be an instance of galsim.BaseDeviate, "
-                            "got %s" % str(self._rng))
+            raise TypeError("rng must be an instance of galsim.BaseDeviate, got %s"%self._rng)
 
         if self._npoints <= 0:
-            raise ValueError("npoints must be > 0, got %s" % str(self._npoints))
+            raise GalSimRangeError("npoints must be > 0", self._npoints, 1)
 
         if self._half_light_radius <= 0.0:
-            raise ValueError("half light radius must be > 0"
-                             ", got %s" % str(self._half_light_radius))
+            raise GalSimRangeError("half light radius must be > 0", self._half_light_radius, 0.)
         if self._flux < 0.0:
-            raise ValueError("flux must be >= 0, got %s" % str(self._flux))
+            raise GalSimRangeError("flux must be >= 0", self._flux, 0.)
 
     def __str__(self):
         rep='galsim.RandomWalk(%(npoints)d, %(hlr)g, flux=%(flux)g, gsparams=%(gsparams)s)'

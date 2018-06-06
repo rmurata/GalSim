@@ -22,11 +22,13 @@ A class that handles affine tranformations of a profile including a possible flu
 import numpy as np
 import math
 import cmath
+
 from . import _galsim
 from .gsobject import GSObject
 from .gsparams import GSParams
 from .utilities import lazy_property, doc_inherit, WeakMethod
 from .position import PositionD
+from .errors import GalSimError, convert_cpp_errors
 
 def Transform(obj, jac=(1.,0.,0.,1.), offset=PositionD(0.,0.), flux_ratio=1., gsparams=None):
     """A function for transforming either a GSObject or ChromaticObject.
@@ -161,8 +163,9 @@ class Transformation(GSObject):
     @lazy_property
     def _sbp(self):
         dudx, dudy, dvdx, dvdy = self._jac.ravel()
-        return _galsim.SBTransform(self._original._sbp, dudx, dudy, dvdx, dvdy,
-                                   self._offset._p, self._flux_ratio, self.gsparams._gsp)
+        with convert_cpp_errors():
+            return _galsim.SBTransform(self._original._sbp, dudx, dudy, dvdx, dvdy,
+                                       self._offset._p, self._flux_ratio, self.gsparams._gsp)
 
     @lazy_property
     def _noise(self):
@@ -194,39 +197,45 @@ class Transformation(GSObject):
         return 'galsim.Transformation(%r, jac=%r, offset=%r, flux_ratio=%r, gsparams=%r)'%(
             self.original, self._jac.tolist(), self.offset, self.flux_ratio, self.gsparams)
 
-    def __str__(self):
+    @classmethod
+    def _str_from_jac(cls, jac):
         from .wcs import JacobianWCS
-        s = str(self.original)
-        dudx, dudy, dvdx, dvdy = self._jac.ravel()
+        dudx, dudy, dvdx, dvdy = jac.ravel()
         if dudx != 1 or dudy != 0 or dvdx != 0 or dvdy != 1:
             # Figure out the shear/rotate/dilate calls that are equivalent.
             jac = JacobianWCS(dudx,dudy,dvdx,dvdy)
             scale, shear, theta, flip = jac.getDecomposition()
-            single = None
+            s = None
             if flip:
-                single = 0  # Special value indicating to just use transform.
+                s = 0  # Special value indicating to just use transform.
             if abs(theta.rad) > 1.e-12:
-                if single is None:
-                    single = '.rotate(%s)'%theta
+                if s is None:
+                    s = '.rotate(%s)'%theta
                 else:
-                    single = 0
+                    s = 0
             if shear.g > 1.e-12:
-                if single is None:
-                    single = '.shear(%s)'%shear
+                if s is None:
+                    s = '.shear(%s)'%shear
                 else:
-                    single = 0
+                    s = 0
             if abs(scale-1.0) > 1.e-12:
-                if single is None:
-                    single = '.expand(%s)'%scale
+                if s is None:
+                    s = '.expand(%s)'%scale
                 else:
-                    single = 0
-            if single == 0:
+                    s = 0
+            if s == 0:
                 # If flip or there are two components, then revert to transform as simpler.
-                single = '.transform(%s,%s,%s,%s)'%(dudx,dudy,dvdx,dvdy)
-            if single is None:
+                s = '.transform(%s,%s,%s,%s)'%(dudx,dudy,dvdx,dvdy)
+            if s is None:
                 # If nothing is large enough to show up above, give full detail of transform
-                single = '.transform(%r,%r,%r,%r)'%(dudx,dudy,dvdx,dvdy)
-            s += single
+                s = '.transform(%r,%r,%r,%r)'%(dudx,dudy,dvdx,dvdy)
+            return s
+        else:
+            return ''
+
+    def __str__(self):
+        s = str(self.original)
+        s += self._str_from_jac(self._jac)
         if self.offset.x != 0 or self.offset.y != 0:
             s += '.shift(%s,%s)'%(self.offset.x,self.offset.y)
         if self.flux_ratio != 1.:

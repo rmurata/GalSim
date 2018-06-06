@@ -20,8 +20,10 @@ A few adjustments to the Bounds class at the Python layer.
 """
 
 import math
+
 from . import _galsim
 from .position import Position, PositionI, PositionD
+from .errors import GalSimUndefinedBoundsError
 
 class Bounds(object):
     """A class for representing image bounds as 2D rectangles.
@@ -92,7 +94,7 @@ class Bounds(object):
     information.
     """
     def __init__(self):
-        raise NotImplementedError("Cannot instantiate the base class.  " +
+        raise NotImplementedError("Cannot instantiate the base class. "
                                   "Use either BoundsD or BoundsI.")
 
     def _parse_args(self, *args, **kwargs):
@@ -127,14 +129,14 @@ class Bounds(object):
                     self.ymin = min(args[0].y, args[1].y)
                     self.ymax = max(args[0].y, args[1].y)
                 else:
-                    raise TypeError("Two arguments to %s must be either Positions"%(
+                    raise TypeError("Two arguments to %s must be Positions"%(
                                     self.__class__.__name__))
             else:
                 raise TypeError("%s takes either 1, 2, or 4 arguments (%d given)"%(
                                 self.__class__.__name__,len(args)))
         elif len(args) != 0:
-            raise TypeError("Cannot provide both keywork and non-keyword arguments to %s"%(
-                self.__class__.__name__))
+            raise TypeError("Cannot provide both keyword and non-keyword arguments to %s"%(
+                            self.__class__.__name__))
         else:
             try:
                 self._isdefined = True
@@ -144,7 +146,7 @@ class Bounds(object):
                 self.ymax = kwargs.pop('ymax')
             except KeyError:
                 raise TypeError("Keyword arguments, xmin, xmax, ymin, ymax are required for %s"%(
-                    self.__class__.__name__))
+                                self.__class__.__name__))
             if kwargs:
                 raise TypeError("Got unexpected keyword arguments %s"%kwargs.keys())
 
@@ -188,7 +190,7 @@ class Bounds(object):
         For a BoundsD, this is equivalent to true_center.
         """
         if not self.isDefined():
-            raise ValueError("center is invalid for an undefined Bounds")
+            raise GalSimUndefinedBoundsError("center is invalid for an undefined Bounds")
         return self._center
 
     @property
@@ -199,7 +201,7 @@ class Bounds(object):
         this may not necessarily be an integer PositionI.
         """
         if not self.isDefined():
-            raise ValueError("true_center is invalid for an undefined Bounds")
+            raise GalSimUndefinedBoundsError("true_center is invalid for an undefined Bounds")
         return PositionD((self.xmax + self.xmin)/2., (self.ymax + self.ymin)/2.)
 
     def includes(self, *args):
@@ -330,7 +332,7 @@ class Bounds(object):
                 return self.__class__(other)
         else:
             raise TypeError("other must be either a %s or a %s"%(
-                    self.__class__.__name__,self._pos_class.__name__))
+                            self.__class__.__name__,self._pos_class.__name__))
 
     def __repr__(self):
         if self.isDefined():
@@ -371,9 +373,6 @@ class BoundsD(Bounds):
 
     def __init__(self, *args, **kwargs):
         self._parse_args(*args, **kwargs)
-        if (self.xmin != float(self.xmin) or self.xmax != float(self.xmax) or
-            self.ymin != float(self.ymin) or self.ymax != float(self.ymax)):
-            raise ValueError("BoundsD must be initialized with float values")
         self.xmin = float(self.xmin)
         self.xmax = float(self.xmax)
         self.ymin = float(self.ymin)
@@ -391,7 +390,7 @@ class BoundsD(Bounds):
             if x == float(x): return
         except (TypeError, ValueError):
             pass
-        raise ValueError("%s must be a float value"%name)
+        raise TypeError("%s must be a float value"%name)
 
     def _area(self):
         return (self.xmax - self.xmin) * (self.ymax - self.ymin)
@@ -414,7 +413,7 @@ class BoundsI(Bounds):
         self._parse_args(*args, **kwargs)
         if (self.xmin != int(self.xmin) or self.xmax != int(self.xmax) or
             self.ymin != int(self.ymin) or self.ymax != int(self.ymax)):
-            raise ValueError("BoundsI must be initialized with integer values")
+            raise TypeError("BoundsI must be initialized with integer values")
         # Now make sure they are all ints
         self.xmin = int(self.xmin)
         self.xmax = int(self.xmax)
@@ -430,7 +429,7 @@ class BoundsI(Bounds):
             if x == int(x): return
         except (TypeError, ValueError):
             pass
-        raise ValueError("%s must be a integer value"%name)
+        raise TypeError("%s must be an integer value"%name)
 
     def numpyShape(self):
         "A simple utility function to get the numpy shape that corresponds to this Bounds object."

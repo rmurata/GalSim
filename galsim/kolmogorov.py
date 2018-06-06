@@ -24,6 +24,7 @@ from .gsobject import GSObject
 from .gsparams import GSParams
 from .utilities import lazy_property, doc_inherit
 from .position import PositionD
+from .errors import GalSimIncompatibleValuesError, convert_cpp_errors
 
 
 class Kolmogorov(GSObject):
@@ -155,25 +156,33 @@ class Kolmogorov(GSObject):
 
         if fwhm is not None :
             if any(item is not None for item in (lam_over_r0, lam, r0, r0_500, half_light_radius)):
-                raise TypeError(
-                        "Only one of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or "+
-                        "r0_500) may be specified for Kolmogorov")
+                raise GalSimIncompatibleValuesError(
+                    "Only one of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or r0_500) "
+                    "may be specified",
+                    fwhm=fwhm, lam_over_r0=lam_over_r0, lam=lam, r0=r0, r0_500=r0_500,
+                    half_light_radius=half_light_radius)
             self._lor0 = float(fwhm) / Kolmogorov._fwhm_factor
         elif half_light_radius is not None:
             if any(item is not None for item in (lam_over_r0, lam, r0, r0_500)):
-                raise TypeError(
-                        "Only one of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or "+
-                        "r0_500) may be specified for Kolmogorov")
+                raise GalSimIncompatibleValuesError(
+                    "Only one of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or r0_500) "
+                    "may be specified",
+                    fwhm=fwhm, lam_over_r0=lam_over_r0, lam=lam, r0=r0, r0_500=r0_500,
+                    half_light_radius=half_light_radius)
             self._lor0 = float(half_light_radius) / Kolmogorov._hlr_factor
         elif lam_over_r0 is not None:
             if any(item is not None for item in (lam, r0, r0_500)):
-                raise TypeError("Cannot specify lam, r0 or r0_500 in conjunction with lam_over_r0.")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot specify lam, r0 or r0_500 in conjunction with lam_over_r0.",
+                    lam_over_r0=lam_over_r0, lam=lam, r0=r0, r0_500=r0_500)
             self._lor0 = float(lam_over_r0)
         else:
             if lam is None or (r0 is None and r0_500 is None):
-                raise TypeError(
-                        "One of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or "+
-                        "r0_500) must be specified for Kolmogorov")
+                raise GalSimIncompatibleValuesError(
+                    "One of lam_over_r0, fwhm, half_light_radius, or lam (with r0 or r0_500) "
+                    "must be specified",
+                    fwhm=fwhm, lam_over_r0=lam_over_r0, lam=lam, r0=r0, r0_500=r0_500,
+                    half_light_radius=half_light_radius)
             # In this case we're going to use scale_unit, so parse it in case of string input:
             if scale_unit is None:
                 scale_unit = arcsec
@@ -187,7 +196,8 @@ class Kolmogorov(GSObject):
 
     @lazy_property
     def _sbp(self):
-        return _galsim.SBKolmogorov(self._lor0, self._flux, self.gsparams._gsp)
+        with convert_cpp_errors():
+            return _galsim.SBKolmogorov(self._lor0, self._flux, self.gsparams._gsp)
 
     @property
     def lam_over_r0(self): return self._lor0

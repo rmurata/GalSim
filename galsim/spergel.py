@@ -24,6 +24,7 @@ from .gsobject import GSObject
 from .gsparams import GSParams
 from .utilities import lazy_property, doc_inherit
 from .position import PositionD
+from .errors import GalSimRangeError, GalSimIncompatibleValuesError, convert_cpp_errors
 
 
 class Spergel(GSObject):
@@ -103,30 +104,47 @@ class Spergel(GSObject):
     _is_analytic_x = True
     _is_analytic_k = True
 
+    # Constrain range of allowed Spergel index nu.  Spergel (2010) Table 1 lists values of nu
+    # from -0.9 to +0.85. We found that nu = -0.9 is too tricky for the GKP integrator to
+    # handle, however, so the lower limit is -0.85 instead.  The upper limit is set by the
+    # cyl_bessel_k function, which runs into overflow errors for nu larger than about 4.0.
+    _minimum_nu = -0.85
+    _maximum_nu = 4.0
+
     def __init__(self, nu, half_light_radius=None, scale_radius=None,
                  flux=1., gsparams=None):
         self._nu = float(nu)
         self._flux = float(flux)
         self._gsparams = GSParams.check(gsparams)
 
+        if self._nu < Spergel._minimum_nu:
+            raise GalSimRangeError("Requested Spergel index is too small",
+                                   self._nu, Spergel._minimum_nu, Spergel._maximum_nu)
+        if self._nu > Spergel._maximum_nu:
+            raise GalSimRangeError("Requested Spergel index is too large",
+                                   self._nu, Spergel._minimum_nu, Spergel._maximum_nu)
+
         # Parse the radius options
         if half_light_radius is not None:
             if scale_radius is not None:
-                raise TypeError(
-                        "Only one of scale_radius or half_light_radius may be " +
-                        "specified for Spergel")
+                raise GalSimIncompatibleValuesError(
+                    "Only one of scale_radius or half_light_radius may be specified",
+                    half_light_radius=half_light_radius, scale_radius=scale_radius)
             self._hlr = float(half_light_radius)
-            self._r0 = self._hlr / _galsim.SpergelCalculateHLR(self._nu)
+            with convert_cpp_errors():
+                self._r0 = self._hlr / _galsim.SpergelCalculateHLR(self._nu)
         elif scale_radius is not None:
             self._r0 = float(scale_radius)
             self._hlr = 0.
         else:
-            raise TypeError(
-                    "Either scale_radius or half_light_radius must be specified for Spergel")
+            raise GalSimIncompatibleValuesError(
+                "Either scale_radius or half_light_radius must be specified for Spergel",
+                half_light_radius=half_light_radius, scale_radius=scale_radius)
 
     @lazy_property
     def _sbp(self):
-        return _galsim.SBSpergel(self._nu, self._r0, self._flux, self.gsparams._gsp)
+        with convert_cpp_errors():
+            return _galsim.SBSpergel(self._nu, self._r0, self._flux, self.gsparams._gsp)
 
     @property
     def nu(self): return self._nu
@@ -135,7 +153,8 @@ class Spergel(GSObject):
     @property
     def half_light_radius(self):
         if self._hlr == 0.:
-            self._hlr = self._r0 * _galsim.SpergelCalculateHLR(self._nu)
+            with convert_cpp_errors():
+                self._hlr = self._r0 * _galsim.SpergelCalculateHLR(self._nu)
         return self._hlr
 
     def calculateIntegratedFlux(self, r):

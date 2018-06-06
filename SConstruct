@@ -1328,8 +1328,8 @@ def GetPythonVersion(config):
     # there:
     if not result:
         py_version = ''
-        for v in ['2.7', '2,6', '3.4', '3.5', # supported versions first
-                  '2.5', '2,4', '3.3', '3.2', '3.1', '3.0']: # these are mostly to give accurate logging and error messages
+        for v in ['2.7', '3.4', '3.5', '3.6', # supported versions first
+                  '2.6', '2.5', '2,4', '3.3', '3.2', '3.1', '3.0']: # these are mostly to give accurate logging and error messages
             if v in py_inc or v in python:
                 py_version = v
                 break
@@ -1601,6 +1601,9 @@ PyMODINIT_FUNC initcheck_tmv(void)
 
 def CheckEigen(config):
     eigen_source_file = """
+#if defined(__GNUC__) && __GNUC__ >= 6
+#pragma GCC diagnostic ignored "-Wint-in-bool-context"
+#endif
 #include "Python.h"
 #include "Eigen/Core"
 #include "Eigen/Cholesky"
@@ -1763,24 +1766,16 @@ PyMODINIT_FUNC initcheck_numpy(void)
     return 1
 
 def CheckPyFITS(config):
-    config.Message('Checking for PyFITS... ')
+    config.Message('Checking for astropy.io.fits... ')
 
-    result, output = TryScript(config,"import pyfits",python)
-    astropy = False
+    result, output = TryScript(config,"import astropy.io.fits",python)
     if not result:
-        result, output = TryScript(config,"import astropy.io.fits",python)
-        astropy = True
-    if not result:
-        ErrorExit("Unable to import pyfits or astropy.io.fits using the python executable:\n" +
+        ErrorExit("Unable to import astropy.io.fits using the python executable:\n" +
                   python)
     config.Result(1)
 
-    if astropy:
-        result, astropy_ver = TryScript(config,"import astropy; print(astropy.__version__)",python)
-        print('Astropy version is',astropy_ver)
-    else:
-        result, pyfits_ver = TryScript(config,"import pyfits; print(pyfits.__version__)",python)
-        print('PyFITS version is',pyfits_ver)
+    result, astropy_ver = TryScript(config,"import astropy; print(astropy.__version__)",python)
+    print('Astropy version is',astropy_ver)
 
     return 1
 

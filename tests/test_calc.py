@@ -159,6 +159,8 @@ def test_sigma():
     np.testing.assert_equal(
             (g1.sigma, g1.sigma), g1.calculateMomentRadius(rtype='both'),
             err_msg="Gaussian.calculateMomentRadius(both) returned wrong value.")
+    with assert_raises(galsim.GalSimValueError):
+        g1.calculateMomentRadius(rtype='invalid')
 
     # Check for a convolution of two Gaussians.  Should be equivalent, but now will need to
     # do the calculation.
@@ -259,6 +261,8 @@ def test_sigma():
     np.testing.assert_almost_equal(
             test_sigma/e1_sigma, 1.0, decimal=4,
             err_msg="image.calculateMomentRadius is not accurate.")
+    with assert_raises(galsim.GalSimValueError):
+        im.calculateMomentRadius(rtype='invalid')
 
     # Check that a non-square image works correctly.  Also, not centered anywhere in particular.
     bounds = galsim.BoundsI(-1234, -1234+size*2, 8234, 8234+size)

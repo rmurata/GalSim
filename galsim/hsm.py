@@ -57,11 +57,14 @@ with default values, using help(galsim.hsm.HSMParams).
 
 
 import numpy as np
+
 from . import _galsim
 from .position import PositionD
 from .bounds import BoundsI
 from .shear import Shear
 from .image import Image, ImageI, ImageF, ImageD
+from .errors import GalSimError, GalSimValueError, GalSimHSMError, GalSimIncompatibleValuesError
+from .errors import convert_cpp_errors
 
 
 class ShapeData(object):
@@ -149,14 +152,15 @@ class ShapeData(object):
             raise TypeError("image_bounds must be a BoundsI instance")
         # The others will raise an appropriate TypeError from the call to _galsim.ShapeData.
 
-        self._data = _galsim.ShapeData(
-            image_bounds._b, int(moments_status), observed_shape.e1, observed_shape.e2,
-            float(moments_sigma), float(moments_amp), moments_centroid._p, float(moments_rho4),
-            int(moments_n_iter), int(correction_status), float(corrected_e1), float(corrected_e2),
-            float(corrected_g1), float(corrected_g2), str(meas_type), float(corrected_shape_err),
-            str(correction_method), float(resolution_factor), float(psf_sigma),
-            psf_shape.e1, psf_shape.e2, str(error_message))
-
+        with convert_cpp_errors(GalSimHSMError):
+            self._data = _galsim.ShapeData(
+                image_bounds._b, int(moments_status), observed_shape.e1, observed_shape.e2,
+                float(moments_sigma), float(moments_amp), moments_centroid._p,
+                float(moments_rho4), int(moments_n_iter), int(correction_status),
+                float(corrected_e1), float(corrected_e2), float(corrected_g1), float(corrected_g2),
+                str(meas_type), float(corrected_shape_err), str(correction_method),
+                float(resolution_factor), float(psf_sigma), psf_shape.e1, psf_shape.e2,
+                str(error_message))
 
     @property
     def image_bounds(self): return BoundsI(self._data.image_bounds)
@@ -365,7 +369,8 @@ class HSMParams(object):
         self._make_hsmp()
 
     def _make_hsmp(self):
-        self._hsmp = _galsim.HSMParams(*self._getinitargs())
+        with convert_cpp_errors(GalSimHSMError):
+            self._hsmp = _galsim.HSMParams(*self._getinitargs())
 
     def _getinitargs(self):
         return (self.nsig_rg, self.nsig_rg2, self.max_moment_nsig2, self.regauss_too_small,
@@ -456,11 +461,13 @@ def _convertMask(image, weight=None, badpix=None):
     else:
         # if weight image was supplied, check if it has the right bounds and is non-negative
         if weight.bounds != image.bounds:
-            raise ValueError("Weight image does not have same bounds as the input Image!")
+            raise GalSimIncompatibleValuesError(
+                "Weight image does not have same bounds as the input Image.",
+                weight=weight, image=image)
 
         # also make sure there are no negative values
         if np.any(weight.array < 0) == True:
-            raise ValueError("Weight image cannot contain negative values!")
+            raise GalSimValueError("Weight image cannot contain negative values.", weight)
 
         # if weight is an ImageI, then we can use it as the mask image:
         if weight.dtype == np.int32:
@@ -479,12 +486,14 @@ def _convertMask(image, weight=None, badpix=None):
     # image; also check bounds
     if badpix is not None:
         if badpix.bounds != image.bounds:
-            raise ValueError("Badpix image does not have the same bounds as the input Image!")
+            raise GalSimIncompatibleValuesError(
+                "Badpix image does not have the same bounds as the input Image.",
+                badpix=badpix, image=image)
         mask.array[badpix.array != 0] = 0
 
     # if no pixels are used, raise an exception
     if mask.array.sum() == 0:
-        raise RuntimeError("No pixels are being used!")
+        raise GalSimHSMError("No pixels are being used!")
 
     # finally, return the Image for the weight map
     return mask
@@ -595,9 +604,9 @@ def EstimateShear(gal_image, PSF_image, weight=None, badpix=None, sky_var=0.0,
                             the lower-left pixel is (image.xmin, image.ymin).
                             [default: gal_image.true_center]
     @param strict           Whether to require success. If `strict=True`, then there will be a
-                            `RuntimeError` exception if shear estimation fails.  If set to `False`,
-                            then information about failures will be silently stored in the output
-                            ShapeData object. [default: True]
+                            `GalSimHSMError` exception if shear estimation fails.  If set to
+                            `False`, then information about failures will be silently stored in the
+                            output ShapeData object. [default: True]
     @param hsmparams        The hsmparams keyword can be used to change the settings used by
                             EstimateShear() when estimating shears; see HSMParams documentation
                             using help(galsim.hsm.HSMParams) for more information. [default: None]
@@ -622,7 +631,7 @@ def EstimateShear(gal_image, PSF_image, weight=None, badpix=None, sky_var=0.0,
         return result
     except RuntimeError as err:
         if (strict == True):
-            raise
+            raise GalSimHSMError(str(err))
         else:
             return ShapeData(error_message = str(err))
 
@@ -674,7 +683,7 @@ def FindAdaptiveMom(object_image, weight=None, badpix=None, guess_sig=5.0, preci
 
         >>> my_moments = my_gaussian_image.FindAdaptiveMom()
 
-    then the result will be a RuntimeError due to moment measurement failing because the object is
+    then the result will be a GalSimHSMError due to moment measurement failing because the object is
     so large.  While the list of all possible settings that can be changed is accessible in the
     docstring of the HSMParams class, in this case we need to modify `max_amoment` which
     is the maximum value of the moments in units of pixel^2.  The following measurement, using the
@@ -703,9 +712,9 @@ def FindAdaptiveMom(object_image, weight=None, badpix=None, guess_sig=5.0, preci
                             is (image.xmin, image.ymin).
                             [default: object_image.true_center]
     @param strict           Whether to require success. If `strict=True`, then there will be a
-                            `RuntimeError` exception if shear estimation fails.  If set to `False`,
-                            then information about failures will be silently stored in the output
-                            ShapeData object. [default: True]
+                            `GalSimHSMError` exception if shear estimation fails.  If set to
+                            `False`, then information about failures will be silently stored in the
+                            output ShapeData object. [default: True]
     @param round_moments    Use a circular weight function instead of elliptical.
                             [default: False]
     @param hsmparams        The hsmparams keyword can be used to change the settings used by
@@ -731,7 +740,7 @@ def FindAdaptiveMom(object_image, weight=None, badpix=None, guess_sig=5.0, preci
         return result
     except RuntimeError as err:
         if (strict == True):
-            raise
+            raise GalSimHSMError(str(err))
         else:
             return ShapeData(error_message = str(err))
 

@@ -21,12 +21,13 @@ A program to download the COSMOS RealGalaxy catalog for use with GalSim.
 
 from __future__ import print_function
 from builtins import input
-
 import os, sys, tarfile, subprocess, shutil, json
 try:
     from urllib2 import urlopen
 except:
     from urllib.request import urlopen
+
+from .utilities import ensure_dir
 
 script_name = 'galsim_download_cosmos'
 
@@ -153,11 +154,6 @@ def query_yes_no(question, default="yes"):
             sys.stdout.write("Please respond with 'yes' or 'no' "\
                              "(or 'y' or 'n').\n")
 
-def ensure_dir(target):
-    d = os.path.dirname(target)
-    if not os.path.exists(d):
-        os.makedirs(d)
-
 def download(url, target, unpack_dir, args, logger):
     logger.warning('Downloading from url:\n  %s',url)
     logger.warning('Target location is:\n  %s',target)
@@ -232,7 +228,7 @@ def download(url, target, unpack_dir, args, logger):
 
         if obsolete:
             if args.quiet or args.force:
-                logger.warning("The version currently on disk is obsolete.  "+
+                logger.warning("The version currently on disk is obsolete.  "
                                "Downloading new version.")
             else:
                 q = "The version currently on disk is obsolete.  Download new version?"
@@ -240,10 +236,10 @@ def download(url, target, unpack_dir, args, logger):
                 if yn == 'no':
                     do_download = False
         elif args.force:
-            logger.info("Target file has already been downloaded and unpacked.  "+
+            logger.info("Target file has already been downloaded and unpacked.  "
                         "Forced re-download.")
         elif args.quiet:
-            logger.info("Target file has already been downloaded and unpacked.  "+
+            logger.info("Target file has already been downloaded and unpacked.  "
                         "Not re-downloading.")
             do_download = False
             args.save = True  # Don't delete it!
@@ -285,9 +281,9 @@ def download(url, target, unpack_dir, args, logger):
                         sys.stdout.flush()
                         next_dot += file_size/100.
             logger.info("Download complete.")
-        except IOError as e:
+        except (IOError, OSError) as e:
             # Try to give a reasonable suggestion for some common IOErrors.
-            logger.error("\n\nIOError: %s",str(e))
+            logger.error("\n\nOSError: %s",str(e))
             if 'Permission denied' in str(e):
                 logger.error("Rerun using sudo %s",script_name)
                 logger.error("If this is not possible, you can download to an alternate location:")
@@ -301,12 +297,7 @@ def download(url, target, unpack_dir, args, logger):
 
 def unpack(target, target_dir, unpack_dir, meta, args, logger):
     logger.info("Unpacking the tarball...")
-    #with tarfile.open(target) as tar:
-    # The above line works on python 2.7+.  But to make sure we work for 2.6, we use the
-    # following workaround.
-    # cf. http://stackoverflow.com/questions/6086603/statement-with-and-tarfile
-    from contextlib import closing
-    with closing(tarfile.open(target)) as tar:
+    with tarfile.open(target) as tar:
         if args.verbosity >= 3:
             tar.list(verbose=True)
         elif args.verbosity >= 2:

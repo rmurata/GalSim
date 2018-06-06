@@ -21,20 +21,14 @@ import numpy as np
 import os
 import sys
 
+import galsim
 from galsim_test_helpers import *
-
-try:
-    import galsim
-except ImportError:
-    sys.path.append(os.path.abspath(os.path.join(path, "..")))
-    import galsim
 
 
 @timer
 def test_vk(slow=False):
     """Test the generation of VonKarman profiles
     """
-    gsp = galsim.GSParams(maximum_fft_size=8192)
     if slow:
         lams = [300.0, 500.0, 1100.0]
         r0_500s = [0.05, 0.15, 0.3]
@@ -57,7 +51,7 @@ def test_vk(slow=False):
                         print("Skip this combination, since delta > maxk_threshold")
                         continue
 
-                    vk = galsim.VonKarman(flux=2.2, gsparams=gsp, **kwargs)
+                    vk = galsim.VonKarman(flux=2.2, **kwargs)
                     np.testing.assert_almost_equal(vk.flux, 2.2)
 
                     check_basic(vk, "VonKarman")
@@ -74,7 +68,7 @@ def test_vk_delta():
     """Test a VonKarman with a significant delta-function amplitude"""
     kwargs = {'lam':1100.0, 'r0':0.8, 'L0':5.0, 'flux':2.2}
     # Try to see if we can catch the warning first
-    with assert_warns(UserWarning):
+    with assert_warns(galsim.GalSimWarning):
         vk = galsim.VonKarman(**kwargs)
 
     kwargs['suppress_warning'] = True

@@ -28,6 +28,9 @@ from .position import PositionD
 from .image import Image
 from .utilities import doc_inherit
 from . import _galsim
+from .errors import GalSimValueError, GalSimIncompatibleValuesError, GalSimNotImplementedError
+from .errors import convert_cpp_errors
+
 
 class Shapelet(GSObject):
     """A class describing polar shapelet surface brightness profiles.
@@ -134,11 +137,13 @@ class Shapelet(GSObject):
             self._bvec = np.empty(bvec_size, dtype=float)
         else:
             if len(bvec) != bvec_size:
-                raise ValueError("bvec is the wrong size for the provided order")
+                raise GalSimIncompatibleValuesError(
+                    "bvec is the wrong size for the provided order", bvec=bvec, order=order)
             self._bvec = np.ascontiguousarray(bvec, dtype=float)
 
-        self._sbp = _galsim.SBShapelet(self._sigma, self._order, self._bvec.ctypes.data,
-                                       self.gsparams._gsp)
+        with convert_cpp_errors():
+            self._sbp = _galsim.SBShapelet(self._sigma, self._order, self._bvec.ctypes.data,
+                                           self.gsparams._gsp)
 
     @classmethod
     def size(cls, order):
@@ -187,8 +192,9 @@ class Shapelet(GSObject):
 
     def __setstate__(self, d):
         self.__dict__ = d
-        self._sbp = _galsim.SBShapelet(self._sigma, self._order, self._bvec.ctypes.data,
-                                       self.gsparams._gsp)
+        with convert_cpp_errors():
+            self._sbp = _galsim.SBShapelet(self._sigma, self._order, self._bvec.ctypes.data,
+                                           self.gsparams._gsp)
 
     @property
     def _maxk(self):
@@ -272,27 +278,29 @@ class Shapelet(GSObject):
         center = PositionD(center.x,center.y)
 
         if not normalization.lower() in ("flux", "f", "surface brightness", "sb"):
-            raise ValueError(("Invalid normalization requested: '%s'. Expecting one of 'flux', "+
-                                "'f', 'surface brightness' or 'sb'.") % normalization)
+            raise GalSimValueError("Invalid normalization requested.", normalization,
+                                   ('flux', 'f', 'surface brightneess', 'sb'))
 
         ret = Shapelet(sigma, order, bvec=None, gsparams=gsparams)
 
         if image.wcs is not None and not image.wcs.isPixelScale():
             # TODO: Add ability for ShapeletFitImage to take jacobian matrix.
-            raise NotImplementedError("Sorry, cannot (yet) fit a shapelet model to an image "+
-                                        "with a non-trivial WCS.")
+            raise GalSimNotImplementedError("Sorry, cannot (yet) fit a shapelet model to an image "
+                                            "with a non-trivial WCS.")
 
         # Make it double precision if it is not.
         image = Image(image, dtype=np.float64, copy=False)
 
-        _galsim.ShapeletFitImage(ret._sigma, ret._order, ret._bvec.ctypes.data,
-                                 image._image, image.scale, center._p)
+        with convert_cpp_errors():
+            _galsim.ShapeletFitImage(ret._sigma, ret._order, ret._bvec.ctypes.data,
+                                     image._image, image.scale, center._p)
 
         if normalization.lower() == "flux" or normalization.lower() == "f":
             ret._bvec /= image.scale**2
 
         # Update the SBProfile, since it doesn't have the right bvector anymore.
-        ret._sbp = _galsim.SBShapelet(ret._sigma, ret._order, ret._bvec.ctypes.data,
-                                      ret.gsparams._gsp)
+        with convert_cpp_errors():
+            ret._sbp = _galsim.SBShapelet(ret._sigma, ret._order, ret._bvec.ctypes.data,
+                                          ret.gsparams._gsp)
 
         return ret

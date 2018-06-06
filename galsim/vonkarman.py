@@ -27,6 +27,7 @@ from .gsparams import GSParams
 from .utilities import lazy_property, doc_inherit
 from .position import PositionD
 from .angle import arcsec, AngleUnit
+from .errors import GalSimError, convert_cpp_errors, galsim_warn
 
 
 class VonKarman(GSObject):
@@ -116,19 +117,21 @@ class VonKarman(GSObject):
 
     @lazy_property
     def _sbvk(self):
-        sbvk = _galsim.SBVonKarman(self._lam, self._r0, self._L0, self._flux,
-                                   self._scale, self._do_delta, self._gsparams._gsp)
+        with convert_cpp_errors():
+            sbvk = _galsim.SBVonKarman(self._lam, self._r0, self._L0, self._flux,
+                                       self._scale, self._do_delta, self._gsparams._gsp)
+
         self._delta = sbvk.getDelta()
         if not self._suppress:
             if self._delta > self._gsparams.maxk_threshold:
-                import warnings
-                warnings.warn("VonKarman delta-function component is larger than maxk_threshold.  "
-                              "Please see docstring for information about this component and how "
-                              "to toggle it.")
+                galsim_warn("VonKarman delta-function component is larger than maxk_threshold.  "
+                            "Please see docstring for information about this component and how "
+                            "to toggle it.")
         if self._do_delta:
-            sbvk = _galsim.SBVonKarman(self._lam, self._r0, self._L0,
-                                       self._flux-self._delta, self._scale,
-                                       self._do_delta, self._gsparams._gsp)
+            with convert_cpp_errors():
+                sbvk = _galsim.SBVonKarman(self._lam, self._r0, self._L0,
+                                           self._flux-self._delta, self._scale,
+                                           self._do_delta, self._gsparams._gsp)
         return sbvk
 
     @lazy_property
@@ -136,8 +139,9 @@ class VonKarman(GSObject):
         # Add in a delta function with appropriate amplitude if requested.
         if self._do_delta:
             sbvk = self._sbvk
-            sbdelta = _galsim.SBDeltaFunction(self._delta, self._gsparams._gsp)
-            return _galsim.SBAdd([sbvk, sbdelta], self._gsparams._gsp)
+            with convert_cpp_errors():
+                sbdelta = _galsim.SBDeltaFunction(self._delta, self._gsparams._gsp)
+                return _galsim.SBAdd([sbvk, sbdelta], self._gsparams._gsp)
         else:
             return self._sbvk
 

@@ -22,7 +22,10 @@ DistDeviate class.
 
 import numpy as np
 import weakref
+
 from . import _galsim
+from .errors import GalSimRangeError, GalSimValueError, GalSimIncompatibleValuesError
+from .errors import convert_cpp_errors
 
 class BaseDeviate(object):
     """Base class for all the various random deviates.
@@ -116,9 +119,11 @@ class BaseDeviate(object):
         if isinstance(seed, BaseDeviate):
             self._reset(seed)
         elif isinstance(seed, (str, int)):
-            self._rng = self._rng_type(_galsim.BaseDeviateImpl(seed), *self._rng_args)
+            with convert_cpp_errors():
+                self._rng = self._rng_type(_galsim.BaseDeviateImpl(seed), *self._rng_args)
         elif seed is None:
-            self._rng = self._rng_type(_galsim.BaseDeviateImpl(0), *self._rng_args)
+            with convert_cpp_errors():
+                self._rng = self._rng_type(_galsim.BaseDeviateImpl(0), *self._rng_args)
         else:
             raise TypeError("BaseDeviate must be initialized with either an int or another "
                             "BaseDeviate")
@@ -127,7 +132,8 @@ class BaseDeviate(object):
         """Equivalent to self.reset(rng), but rng must be a BaseDeviate (not an int), and there
         is no type checking.
         """
-        self._rng = self._rng_type(rng._rng, *self._rng_args)
+        with convert_cpp_errors():
+            self._rng = self._rng_type(rng._rng, *self._rng_args)
 
     def duplicate(self):
         """Create a duplicate of the current Deviate object.  The subsequent series from each copy
@@ -155,8 +161,9 @@ class BaseDeviate(object):
         """
         ret = BaseDeviate.__new__(self.__class__)
         ret.__dict__.update(self.__dict__)
-        rng = _galsim.BaseDeviateImpl(self.serialize())
-        ret._rng = self._rng_type(rng, *ret._rng_args)
+        with convert_cpp_errors():
+            rng = _galsim.BaseDeviateImpl(self.serialize())
+            ret._rng = self._rng_type(rng, *ret._rng_args)
         return ret
 
     def __copy__(self):
@@ -170,8 +177,9 @@ class BaseDeviate(object):
 
     def __setstate__(self, d):
         self.__dict__ = d
-        rng = _galsim.BaseDeviateImpl(d['rng_str'])
-        self._rng = self._rng_type(rng, *self._rng_args)
+        with convert_cpp_errors():
+            rng = _galsim.BaseDeviateImpl(d['rng_str'])
+            self._rng = self._rng_type(rng, *self._rng_args)
 
     def clearCache(self):
         """Clear the internal cache of the Deviate, if any.  This is currently only relevant for
@@ -298,7 +306,7 @@ class GaussianDeviate(BaseDeviate):
     """
     def __init__(self, seed=None, mean=0., sigma=1.):
         if sigma < 0.:
-            raise ValueError("GaussianDeviate sigma must be > 0.")
+            raise GalSimRangeError("GaussianDeviate sigma must be > 0.", sigma, 0.)
         self._rng_type = _galsim.GaussianDeviateImpl
         self._rng_args = (float(mean), float(sigma))
         self.reset(seed)
@@ -683,8 +691,9 @@ class DistDeviate(BaseDeviate):
                 if interpolant is None:
                     interpolant='linear'
                 if x_min or x_max:
-                    raise TypeError('Cannot pass x_min or x_max alongside a '
-                                    'filename in arguments to DistDeviate')
+                    raise GalSimIncompatibleValuesError(
+                        "Cannot pass x_min or x_max with a filename argument",
+                        function=function, x_min=x_min, x_max=x_max)
                 function = LookupTable.from_file(function, interpolant=interpolant)
                 x_min = function.x_min
                 x_max = function.x_max
@@ -698,28 +707,33 @@ class DistDeviate(BaseDeviate):
                         # but we'd like to throw reasonable errors in that case anyway
                         function(0.6) # A value unlikely to be a singular point of a function
                 except Exception as e:
-                    raise ValueError(
-                        "String function must either be a valid filename or something that "+
-                        "can eval to a function of x.\n"+
-                        "Input provided: {0}\n".format(self.__function)+
-                        "Caught error: {0}".format(e))
+                    raise GalSimValueError(
+                        "String function must either be a valid filename or something that "
+                        "can eval to a function of x.\n"
+                        "Caught error: {0}".format(e), self.__function)
         else:
-            self.__function = weakref.ref(function) # Save the inputs to be used in repr
             # Check that the function is actually a function
-            if not (isinstance(function, LookupTable) or hasattr(function, '__call__')):
-                raise TypeError('Keyword function must be a callable function or a string')
+            if not hasattr(function, '__call__'):
+                raise TypeError('function must be a callable function or a string')
             if interpolant:
-                raise TypeError('Cannot provide an interpolant with a callable function argument')
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide an interpolant with a callable function argument",
+                    interpolant=interpolant, function=function)
             if isinstance(function, LookupTable):
                 if x_min or x_max:
-                    raise TypeError('Cannot provide x_min or x_max with a LookupTable function '+
-                                    'argument')
+                    raise GalSimIncompatibleValuesError(
+                        "Cannot provide x_min or x_max with a LookupTable function",
+                        function=function, x_min=x_min, x_max=x_max)
                 x_min = function.x_min
                 x_max = function.x_max
             else:
                 if x_min is None or x_max is None:
-                    raise TypeError('Must provide x_min and x_max when function argument is a '+
-                                    'regular python callable function')
+                    raise GalSimIncompatibleValuesError(
+                        "Must provide x_min and x_max when function argument is a regular "
+                        "python callable function",
+                        function=function, x_min=x_min, x_max=x_max)
+
+            self.__function = weakref.ref(function) # Save the inputs to be used in repr
 
         # Compute the probability distribution function, pdf(x)
         if (npoints is None and isinstance(function, LookupTable) and
@@ -743,15 +757,13 @@ class DistDeviate(BaseDeviate):
 
         # Check that the probability is nonnegative
         if not np.all(pdf >= 0.):
-            raise ValueError('Negative probability passed to DistDeviate: %s'%function)
+            raise GalSimValueError('Negative probability found in DistDeviate.',function)
 
         # Compute the cumulative distribution function = int(pdf(x),x)
         cdf = np.cumsum(pdf)
 
         # Quietly renormalize the probability if it wasn't already normalized
         totalprobability = cdf[-1]
-        if totalprobability < 0.:
-            raise ValueError('Negative probability passed to DistDeviate: %s'%function)
         cdf /= totalprobability
 
         self._inverse_cdf = LookupTable(cdf, xarray, interpolant='linear')
@@ -773,8 +785,7 @@ class DistDeviate(BaseDeviate):
         @returns the corresponding x such that p = cdf(x).
         """
         if p<0 or p>1:
-            raise ValueError('Cannot request cumulative probability value from DistDeviate for '
-                             'p<0 or p>1!  You entered: %f'%p)
+            raise GalSimRangeError('Invalid cumulative probability for DistDeviate', p, 0., 1.)
         return self._inverse_cdf(p)
 
     def __call__(self):
@@ -799,7 +810,7 @@ class DistDeviate(BaseDeviate):
         return  self.__function if isinstance(self.__function, str) else self.__function()
 
     def __repr__(self):
-        return ('galsim.DistDeviate(seed=%r, function=%r, x_min=%r, x_max=%r, interpolant=%r, '+
+        return ('galsim.DistDeviate(seed=%r, function=%r, x_min=%r, x_max=%r, interpolant=%r, '
                 'npoints=%r)')%(self._seed_repr(), self._function, self._xmin, self._xmax,
                                 self._interpolant, self._npoints)
     def __str__(self):

@@ -27,24 +27,8 @@ from galsim_test_helpers import *
 imgdir = os.path.join(".", "SBProfile_comparison_images") # Directory containing the reference
                                                           # images.
 
-
 # for flux normalization tests
 test_flux = 1.8
-
-# These are the default GSParams used when unspecified.  We'll check that specifying
-# these explicitly produces the same results.
-default_params = galsim.GSParams(
-        minimum_fft_size = 128,
-        maximum_fft_size = 4096,
-        folding_threshold = 5.e-3,
-        maxk_threshold = 1.e-3,
-        kvalue_accuracy = 1.e-5,
-        xvalue_accuracy = 1.e-5,
-        shoot_accuracy = 1.e-5,
-        realspace_relerr = 1.e-4,
-        realspace_abserr = 1.e-6,
-        integration_relerr = 1.e-6,
-        integration_abserr = 1.e-8)
 
 # Some parameters used in the two unit tests test_integer_shift_fft and test_integer_shift_photon:
 test_sigma = 1.8
@@ -107,6 +91,12 @@ def test_smallshear():
 
     # Check really small shear  (This mostly tests a branch in the str function.)
     do_pickle(galsim.Gaussian(sigma=2.3).shear(g1=1.e-13,g2=0))
+
+    assert_raises(TypeError, gauss.shear)
+    assert_raises(TypeError, gauss.shear, 0.3)
+    assert_raises(TypeError, gauss.shear, 0.1, 0.3)
+    assert_raises(TypeError, gauss.shear, g1=0.1, g2=0.1, invalid=0.3)
+    assert_raises(TypeError, gauss.shear, myShear, invalid=0.3)
 
 @timer
 def test_largeshear():
@@ -213,6 +203,8 @@ def test_rotate():
     do_pickle(gal, lambda x: x.drawImage())
     do_pickle(gal)
 
+    assert_raises(TypeError, gal.rotate)
+    assert_raises(TypeError, gal.rotate, 34)
 
 @timer
 def test_mag():
@@ -641,8 +633,7 @@ def test_flip():
                        gsparams=galsim.GSParams(realspace_relerr=1.e-6)),
             # Without being convolved by anything with a reasonable k cutoff, this needs
             # a very large fft.
-            galsim.DeVaucouleurs(half_light_radius=0.17, flux=1.7,
-                                 gsparams=galsim.GSParams(maximum_fft_size=8000)),
+            galsim.DeVaucouleurs(half_light_radius=0.17, flux=1.7),
             # I don't really understand why this needs a lower maxk_threshold to work, but
             # without it, the k-space tests fail.
             galsim.Exponential(scale_radius=0.17, flux=1.7,
@@ -883,6 +874,7 @@ def test_ne():
     objs = [galsim.Transform(gal1),
             galsim.Transform(gal2),
             galsim.Transform(gal1, jac=(1, 0.5, 0.5, 1)),
+            galsim.Transform(gal1, jac=(1, 1, 1, 1)),
             galsim.Transform(gal1, jac=jac),
             galsim.Transform(gal1, offset=galsim.PositionD(2, 2)),
             galsim.Transform(gal1, offset=offset),
@@ -890,6 +882,14 @@ def test_ne():
             galsim.Transform(gal1, flux_ratio=flux_ratio),
             galsim.Transform(gal1, gsparams=gsp)]
     all_obj_diff(objs)
+
+    # The degenerate jacobian will build fine, but will raise an exception when used.
+    degen = galsim.Transform(gal1, jac=(1, 1, 1, 1))
+    with assert_raises(galsim.GalSimError):
+        sbp = degen._sbp
+
+    assert_raises(TypeError, galsim.Transform, jac)
+
 
 @timer
 def test_compound():

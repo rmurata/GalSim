@@ -335,7 +335,7 @@ def test_edge_on():
         for inclination in inclinations:
             # Set up the profile
             prof = get_prof(mode, inclination * galsim.radians, scale_radius=scale_radius,
-                            scale_h_over_r=0.1, n=n, gsparams=galsim.GSParams(maximum_fft_size=5132))
+                            scale_h_over_r=0.1, n=n)
 
             check_basic(prof, "Edge-on " + mode)
 
@@ -643,6 +643,12 @@ def test_exceptions():
     with assert_raises(ValueError):
         get_prof("InclinedSersic", inclination = 0.*galsim.degrees,
                  scale_radius = 1., trunc = -4.5)
+
+    # trunc can't be too small in InclinedSersic
+    with assert_raises(ValueError):
+        get_prof("InclinedSersic", inclination = 0.*galsim.degrees,
+                 half_light_radius = 1., trunc = 1.4)
+
 
 @timer
 def test_value_retrieval():

@@ -17,8 +17,8 @@
 #
 
 from builtins import range, zip
-
 import numpy as np
+
 from .random import BaseDeviate, GaussianDeviate
 from .image import Image
 from .angle import radians
@@ -26,6 +26,7 @@ from .table import LookupTable2D
 from . import utilities
 from . import fft
 from . import zernike
+from .errors import GalSimRangeError, GalSimValueError, GalSimIncompatibleValuesError, galsim_warn
 
 
 class AtmosphericScreen(object):
@@ -106,10 +107,13 @@ class AtmosphericScreen(object):
                  vx=0.0, vy=0.0, alpha=1.0, time_step=None, rng=None, suppress_warning=False):
 
         if (alpha != 1.0 and time_step is None):
-            raise ValueError("No time_step provided when alpha != 1.0")
+            raise GalSimIncompatibleValuesError(
+                "No time_step provided when alpha != 1.0", alpha=alpha, time_step=time_step)
         if (alpha == 1.0 and time_step is not None):
-            raise ValueError("Setting AtmosphericScreen time_step prohibited when alpha == 1.0.  "
-                             "Did you mean to set time_step in makePSF or PhaseScreenPSF?")
+            raise GalSimIncompatibleValuesError(
+                "Setting AtmosphericScreen time_step prohibited when alpha == 1.0.  "
+                "Did you mean to set time_step in makePSF or PhaseScreenPSF?",
+                alpha=alpha, time_step=time_step)
         if screen_scale is None:
             # We copy Jee+Tyson(2011) and (arbitrarily) set the screen scale equal to r0 by default.
             screen_scale = r0_500
@@ -143,7 +147,7 @@ class AtmosphericScreen(object):
         return "galsim.AtmosphericScreen(altitude=%s)" % self.altitude
 
     def __repr__(self):
-        return ("galsim.AtmosphericScreen(%r, %r, altitude=%r, r0_500=%r, L0=%r, " +
+        return ("galsim.AtmosphericScreen(%r, %r, altitude=%r, r0_500=%r, L0=%r, "
                 "vx=%r, vy=%r, alpha=%r, time_step=%r, rng=%r)") % (
                         self.screen_size, self.screen_scale, self.altitude, self.r0_500, self.L0,
                         self.vx, self.vy, self.alpha, self.time_step, self._orig_rng)
@@ -211,16 +215,12 @@ class AtmosphericScreen(object):
         if check is not None and not self._suppress_warning:
             if check == 'FFT':
                 if self.kmax != np.inf:
-                    import warnings
-                    warnings.warn(
-                        "Instantiating AtmosphericScreen with kmax != inf "
-                        "may yield surprising results when drawing using Fourier optics.")
+                    galsim_warn("AtmosphericScreen was instantiated for photon shooting. "
+                                "Drawing now with FFT may yield surprising results.")
             if check == 'phot':
                 if self.kmax == np.inf:
-                    import warnings
-                    warnings.warn(
-                        "Instantiating AtmosphericScreen with kmax == inf "
-                        "may yield surprising results when drawing using geometric optics.")
+                    galsim_warn("AtmosphericScreen was instantiated for FFT drawing. "
+                                "Drawing now with photon shooting may yield surprising results.")
 
 
     # Note the magic number 0.00058 is actually ... wait for it ...
@@ -270,7 +270,7 @@ class AtmosphericScreen(object):
             # Can't reverse, so reset and move forward.
             if t < self._time:
                 if t < 0.0:
-                    raise ValueError("Can't rewind irreversible screen to t < 0.0")
+                    raise GalSimRangeError("Can't rewind irreversible screen to t < 0.0", t, 0.)
                 self._reset()
             # Find number of boiling updates we need to perform.
             previous_update_number = int(self._time // self.time_step)
@@ -336,7 +336,7 @@ class AtmosphericScreen(object):
         u = np.array(u, dtype=float)
         v = np.array(v, dtype=float)
         if u.shape != v.shape:
-            raise ValueError("u.shape not equal to v.shape")
+            raise GalSimIncompatibleValuesError("u.shape not equal to v.shape",u=u,v=v)
 
         if t is None:
             t = self._time
@@ -349,7 +349,8 @@ class AtmosphericScreen(object):
         else:
             t = np.array(t, dtype=float)
             if t.shape != u.shape:
-                raise ValueError("t.shape must match u.shape if t is not a scalar")
+                raise GalSimIncompatibleValuesError(
+                    "t.shape must match u.shape if t is not a scalar", t=t, u=u)
 
         self.instantiate()  # noop if already instantiated
 
@@ -396,7 +397,7 @@ class AtmosphericScreen(object):
         u = np.array(u, dtype=float)
         v = np.array(v, dtype=float)
         if u.shape != v.shape:
-            raise ValueError("u.shape not equal to v.shape")
+            raise GalSimIncompatibleValuesError("u.shape not equal to v.shape", u=u, v=v)
 
         from numbers import Real
         if isinstance(t, Real):
@@ -406,7 +407,8 @@ class AtmosphericScreen(object):
         else:
             t = np.array(t, dtype=float)
             if t.shape != u.shape:
-                raise ValueError("t.shape must match u.shape if t is not a scalar")
+                raise GalSimIncompatibleValuesError(
+                    "t.shape must match u.shape if t is not a scalar", t=t, u=u)
 
         self.instantiate()  # noop if already instantiated
 
@@ -578,7 +580,9 @@ def Atmosphere(screen_size, rng=None, _bar=None, **kwargs):
         kwargs['r0_500'] = [r0_500 * w**(-3./5) for w in r0_weights]
         # kwargs['r0_500'] = [nmax**(3./5) * kwargs['r0_500'][0]] * nmax
     elif 'r0_weights' in kwargs:
-        raise ValueError("Cannot use r0_weights if r0_500 is specified as a list.")
+        raise GalSimIncompatibleValuesError(
+            "Cannot use r0_weights if r0_500 is specified as a list.",
+            r0_weights=kwargs['r0_weights'], r0_500=kwargs['r0_500'])
 
     if rng is None:
         rng = BaseDeviate()
@@ -646,15 +650,17 @@ class OpticalScreen(object):
         else:
             # Make sure no individual aberrations were passed in, since they will be ignored.
             if any([tip, tilt, defocus, astig1, astig2, coma1, coma2, trefoil1, trefoil2, spher]):
-                raise TypeError("Cannot pass in individual aberrations and array!")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot pass in individual aberrations and array.",
+                    tip=tip, tilt=tilt, defocus=defocus, astig1=astig1, astig2=astig2,
+                    coma1=coma1, coma2=coma2, trefoil1=trefoil1, trefoil2=trefoil2,
+                    spher=spher, aberrations=aberrations)
             # Aberrations were passed in, so check for right number of entries.
             if len(aberrations) <= 2:
-                raise ValueError("Aberrations keyword must have length > 2")
+                raise GalSimValueError("Aberrations keyword must have length > 2", aberrations)
             # Check for non-zero value in first two places.  Probably a mistake.
             if aberrations[0] != 0.0:
-                import warnings
-                warnings.warn(
-                    "Detected non-zero value in aberrations[0] -- this value is ignored!")
+                galsim_warn("Detected non-zero value in aberrations[0] -- this value is ignored!")
             aberrations = np.array(aberrations)
         self.aberrations = aberrations
 
@@ -741,7 +747,7 @@ class OpticalScreen(object):
         u = np.array(u, dtype=float)
         v = np.array(v, dtype=float)
         if u.shape != v.shape:
-            raise ValueError("u.shape not equal to v.shape")
+            raise GalSimIncompatibleValuesError("u.shape not equal to v.shape", u=u, v=v)
         return self._wavefront(u, v, t, theta)
 
     def _wavefront(self, u, v, t, theta):
@@ -763,7 +769,7 @@ class OpticalScreen(object):
         u = np.array(u, dtype=float)
         v = np.array(v, dtype=float)
         if u.shape != v.shape:
-            raise ValueError("u.shape not equal to v.shape")
+            raise GalSimIncompatibleValuesError("u.shape not equal to v.shape", u=u, v=v)
         return self._wavefront_gradient(u, v, t, theta)
 
 

@@ -29,11 +29,13 @@ from .gsparams import GSParams
 from .image import Image
 from .bounds import _BoundsI
 from .position import PositionD
-from .interpolant import Quintic, Interpolant
+from .interpolant import Quintic, Interpolant, SincInterpolant
 from .utilities import convert_interpolant, lazy_property, doc_inherit
 from .random import BaseDeviate
 from . import _galsim
 from . import fits
+from .errors import GalSimError, GalSimRangeError, GalSimValueError, GalSimUndefinedBoundsError
+from .errors import GalSimIncompatibleValuesError, convert_cpp_errors, galsim_warn
 
 class InterpolatedImage(GSObject):
     """A class describing non-parametric profiles specified using an Image, which can be
@@ -272,27 +274,28 @@ class InterpolatedImage(GSObject):
                  _force_stepk=0., _force_maxk=0., hdu=None):
 
         from .wcs import BaseWCS, PixelScale
-
-        from .wcs import BaseWCS, PixelScale
         from .random import BaseDeviate
 
         # If the "image" is not actually an image, try to read the image as a file.
-        if not isinstance(image, Image):
+        if isinstance(image, str):
             image = fits.read(image, hdu=hdu)
+        elif not isinstance(image, Image):
+            raise TypeError("Supplied image must be an Image or file name")
 
         # make sure image is really an image and has a float type
         if image.dtype != np.float32 and image.dtype != np.float64:
-            raise ValueError("Supplied image does not have dtype of float32 or float64!")
+            raise GalSimValueError("Supplied image must have dtype = float32 or float64.",
+                                   image.dtype)
 
         # it must have well-defined bounds, otherwise seg fault in SBInterpolatedImage constructor
         if not image.bounds.isDefined():
-            raise ValueError("Supplied image does not have bounds defined!")
+            raise GalSimUndefinedBoundsError("Supplied image does not have bounds defined.")
 
         # check what normalization was specified for the image: is it an image of surface
         # brightness, or flux?
         if not normalization.lower() in ("flux", "f", "surface brightness", "sb"):
-            raise ValueError(("Invalid normalization requested: '%s'. Expecting one of 'flux', "+
-                              "'f', 'surface brightness', or 'sb'.") % normalization)
+            raise GalSimValueError("Invalid normalization requested.", normalization,
+                                   ('flux', 'f', 'surface brightness', 'sb'))
 
         # set up the interpolants if none was provided by user, or check that the user-provided ones
         # are of a valid type
@@ -314,14 +317,17 @@ class InterpolatedImage(GSObject):
         # Set the wcs if necessary
         if scale is not None:
             if wcs is not None:
-                raise TypeError("Cannot provide both scale and wcs to InterpolatedImage")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide both scale and wcs to InterpolatedImage", scale=scale, wcs=wcs)
             self._image.wcs = PixelScale(scale)
         elif wcs is not None:
             if not isinstance(wcs, BaseWCS):
                 raise TypeError("wcs parameter is not a galsim.BaseWCS instance")
             self._image.wcs = wcs
         elif self._image.wcs is None:
-            raise ValueError("No information given with Image or keywords about pixel scale!")
+            raise GalSimIncompatibleValuesError(
+                "No information given with Image or keywords about pixel scale!",
+                scale=scale, wcs=wcs, image=image)
 
         # Figure out the offset to apply based on the original image (not the padded one).
         # We will apply this below in _sbp.
@@ -338,8 +344,8 @@ class InterpolatedImage(GSObject):
         # I think the only things that will mess up if flux == 0 are the
         # calculateStepK and calculateMaxK functions, and rescaling the flux to some value.
         if (calculate_stepk or calculate_maxk or flux is not None) and self._image_flux == 0.:
-            raise RuntimeError("This input image has zero total flux. "
-                               "It does not define a valid surface brightness profile.")
+            raise GalSimValueError("This input image has zero total flux. It does not define a "
+                                   "valid surface brightness profile.", image)
 
         # Process the different options for flux, stepk, maxk
         self._flux = self._getFlux(flux, normalization)
@@ -351,12 +357,13 @@ class InterpolatedImage(GSObject):
     def _sbp(self):
         min_scale = self._wcs._minScale()
         max_scale = self._wcs._maxScale()
-        self._sbii = _galsim.SBInterpolatedImage(
-                self._xim._image, self._image.bounds._b, self._pad_image.bounds._b,
-                self._x_interpolant._i, self._k_interpolant._i,
-                self._stepk*min_scale,
-                self._maxk*max_scale,
-                self.gsparams._gsp)
+        with convert_cpp_errors():
+            self._sbii = _galsim.SBInterpolatedImage(
+                    self._xim._image, self._image.bounds._b, self._pad_image.bounds._b,
+                    self._x_interpolant._i, self._k_interpolant._i,
+                    self._stepk*min_scale,
+                    self._maxk*max_scale,
+                    self.gsparams._gsp)
 
         self._sbp = self._sbii  # Temporary.  Will overwrite this with the return value.
 
@@ -388,25 +395,37 @@ class InterpolatedImage(GSObject):
 
     def _buildRealImage(self, pad_factor, pad_image, noise_pad_size, noise_pad, rng, use_cache):
         # Check that given pad_image is valid:
-        if pad_image:
+        if pad_image is not None:
             if isinstance(pad_image, basestring):
                 pad_image = fits.read(pad_image)
-            else:
+            elif isinstance(pad_image, Image):
                 pad_image = pad_image._view()
-            if not isinstance(pad_image, Image):
-                raise ValueError("Supplied pad_image is not an Image!")
+            else:
+                raise TypeError("Supplied pad_image must be an Image.", pad_image)
             if pad_image.dtype != np.float32 and pad_image.dtype != np.float64:
-                raise ValueError("Supplied pad_image is not one of the allowed types!")
+                raise GalSimValueError("Invalid dtype for Supplied pad_image.", pad_image.dtype,
+                                       (np.float32, np.float64))
 
         if pad_factor <= 0.:
-            raise ValueError("Invalid pad_factor <= 0 in InterpolatedImage")
+            raise GalSimRangeError("Invalid pad_factor <= 0 in InterpolatedImage", pad_factor, 0.)
 
         # Convert noise_pad_size from arcsec to pixels according to the local wcs.
         # Use the minimum scale, since we want to make sure noise_pad_size is
         # as large as we need in any direction.
         if noise_pad_size:
+            if noise_pad_size < 0:
+                raise GalSimValueError("noise_pad_size may not be negative", noise_pad_size)
+            if not noise_pad:
+                raise GalSimIncompatibleValuesError(
+                        "Must provide noise_pad if noise_pad_size > 0",
+                        noise_pad=noise_pad, noise_pad_size=noise_pad_size)
             noise_pad_size = int(math.ceil(noise_pad_size / self._wcs._minScale()))
             noise_pad_size = Image.good_fft_size(noise_pad_size)
+        else:
+            if noise_pad:
+                raise GalSimIncompatibleValuesError(
+                        "Must provide noise_pad_size if noise_pad != 0",
+                        noise_pad=noise_pad, noise_pad_size=noise_pad_size)
 
         # The size of the final padded image is the largest of the various size specifications
         pad_size = max(self._image.array.shape)
@@ -425,7 +444,7 @@ class InterpolatedImage(GSObject):
 
         # If requested, fill (some of) this image with noise padding.
         nz_bounds = self._image.bounds
-        if noise_pad_size > 0 and noise_pad is not None:
+        if noise_pad:
             # This is a bit involved, so pass this off to another helper function.
             b = self._buildNoisePadImage(noise_pad_size, noise_pad, rng, use_cache)
             nz_bounds += b
@@ -464,10 +483,6 @@ class InterpolatedImage(GSObject):
         # Figure out what kind of noise to apply to the image
         try:
             noise_pad = float(noise_pad)
-            if noise_pad < 0.:
-                raise ValueError("Noise variance cannot be negative!")
-            noise = GaussianNoise(rng1, sigma = np.sqrt(noise_pad))
-
         except (TypeError, ValueError):
             if isinstance(noise_pad, _BaseCorrelatedNoise):
                 noise = noise_pad.copy(rng=rng1)
@@ -484,9 +499,14 @@ class InterpolatedImage(GSObject):
                 if use_cache:
                     InterpolatedImage._cache_noise_pad[noise_pad] = noise
             else:
-                raise ValueError(
-                    "Input noise_pad must be a float/int, a CorrelatedNoise, Image, or filename "+
-                    "containing an image to use to make a CorrelatedNoise!")
+                raise GalSimValueError(
+                    "Input noise_pad must be a float/int, a CorrelatedNoise, Image, or filename "
+                    "containing an image to use to make a CorrelatedNoise.", noise_pad)
+
+        else:
+            if noise_pad < 0.:
+                raise GalSimRangeError("Noise variance may not be negative.", noise_pad, 0.)
+            noise = GaussianNoise(rng1, sigma = np.sqrt(noise_pad))
 
         # Find the portion of xim to fill with noise.
         # It's allowed for the noise padding to not cover the whole pad image
@@ -504,7 +524,7 @@ class InterpolatedImage(GSObject):
         # need to rescale flux by the pixel area to get proper normalization.
         if flux is None:
             flux = self._image_flux
-            if normalization.lower() in ['surface brightness','sb']:
+            if normalization.lower() in ('surface brightness','sb'):
                 flux *= self._wcs.pixelArea()
         return flux
 
@@ -531,7 +551,8 @@ class InterpolatedImage(GSObject):
                 b = self._image.bounds & b
                 im = self._image[b]
             thresh = (1.-self.gsparams.folding_threshold) * self._image_flux
-            R = _galsim.CalculateSizeContainingFlux(self._image._image, thresh)
+            with convert_cpp_errors():
+                R = _galsim.CalculateSizeContainingFlux(self._image._image, thresh)
         else:
             R = np.max(self._image.array.shape) / 2. - 0.5
         return self._getSimpleStepK(R)
@@ -653,7 +674,8 @@ class InterpolatedImage(GSObject):
 
     @doc_inherit
     def _shoot(self, photons, ud):
-        self._sbp.shoot(photons._pa, ud._rng)
+        with convert_cpp_errors():
+            self._sbp.shoot(photons._pa, ud._rng)
 
     @doc_inherit
     def _drawReal(self, image):
@@ -821,35 +843,47 @@ class InterpolatedKImage(GSObject):
                  real_kimage=None, imag_kimage=None, real_hdu=None, imag_hdu=None):
         if kimage is None:
             if real_kimage is None or imag_kimage is None:
-                raise ValueError("Must provide either kimage or real_kimage/imag_kimage")
+                raise GalSimIncompatibleValuesError(
+                    "Must provide either kimage or real_kimage/imag_kimage",
+                    kimage=kimage, real_kimage=real_kimage, imag_kimage=imag_kimage)
 
             # If the "image" is not actually an image, try to read the image as a file.
-            if not isinstance(real_kimage, Image):
+            if isinstance(real_kimage, str):
                 real_kimage = fits.read(real_kimage, hdu=real_hdu)
-            if not isinstance(imag_kimage, Image):
+            elif not isinstance(real_kimage, Image):
+                raise TypeError("real_kimage must be either an Image or a file name")
+            if isinstance(imag_kimage, str):
                 imag_kimage = fits.read(imag_kimage, hdu=imag_hdu)
+            elif not isinstance(imag_kimage, Image):
+                raise TypeError("imag_kimage must be either an Image or a file name")
 
-            # make sure real_kimage, imag_kimage are really `Image`s, are floats, and are
-            # congruent.
-            if not isinstance(real_kimage, Image):
-                raise ValueError("Supplied real_kimage is not an Image instance")
-            if not isinstance(imag_kimage, Image):
-                raise ValueError("Supplied imag_kimage is not an Image instance")
+            # make sure real_kimage, imag_kimage are congruent.
             if real_kimage.bounds != imag_kimage.bounds:
-                raise ValueError("Real and Imag kimages must have same bounds.")
+                raise GalSimIncompatibleValuesError(
+                    "Real and Imag kimages must have same bounds.",
+                    real_kimage=real_kimage, imag_kimage=imag_kimage)
             if real_kimage.wcs != imag_kimage.wcs:
-                raise ValueError("Real and Imag kimages must have same scale/wcs.")
+                raise GalSimIncompatibleValuesError(
+                    "Real and Imag kimages must have same scale/wcs.",
+                    real_kimage=real_kimage, imag_kimage=imag_kimage)
 
             kimage = real_kimage + 1j*imag_kimage
         else:
             if real_kimage is not None or imag_kimage is not None:
-                raise ValueError("Cannot provide both kimage and real_kimage/imag_kimage")
+                raise GalSimIncompatibleValuesError(
+                    "Cannot provide both kimage and real_kimage/imag_kimage",
+                    kimage=kimage, real_kimage=real_kimage, imag_kimage=imag_kimage)
+            if not isinstance(kimage, Image):
+                raise TypeError("kimage must be a galsim.Image isntance")
             if not kimage.iscomplex:
-                raise ValueError("Supplied kimage is not complex")
+                raise GalSimValueError("Supplied kimage is not complex", kimage)
 
         # Make sure wcs is a PixelScale.
         if kimage.wcs is not None and not kimage.wcs.isPixelScale():
-            raise ValueError("kimage wcs must be PixelScale or None.")
+            raise GalSimValueError("kimage wcs must be PixelScale or None.", kimage.wcs)
+
+        if not kimage.bounds.isDefined():
+            raise GalSimUndefinedBoundsError("Supplied image does not have bounds defined.")
 
         self._kimage = kimage.copy()
         self._gsparams = GSParams.check(gsparams)
@@ -866,7 +900,8 @@ class InterpolatedKImage(GSObject):
                             kimage[bd].real.array[::-1,::-1]) and
                 np.allclose(kimage[bd].imag.array,
                             -kimage[bd].imag.array[::-1,::-1])):
-            raise ValueError("Real and Imag kimages must form a Hermitian complex matrix.")
+            raise GalSimIncompatibleValuesError(
+                "Real and Imag kimages must form a Hermitian complex matrix.", kimage=kimage)
 
         if stepk is None:
             if self._kimage.scale is None:
@@ -874,8 +909,7 @@ class InterpolatedKImage(GSObject):
                 self._kimage.scale = 1.
             self._stepk = self._kimage.scale
         elif stepk < kimage.scale:
-            import warnings
-            warnings.warn(
+            galsim_warn(
                 "Provided stepk is smaller than kimage.scale; overriding with kimage.scale.")
             self._stepk = kimage.scale
         else:
@@ -899,14 +933,16 @@ class InterpolatedKImage(GSObject):
     @lazy_property
     def _sbp(self):
         stepk_image = self.stepk / self.kimage.scale  # usually 1, but could be larger
-        self._sbiki = _galsim.SBInterpolatedKImage(
-                self.kimage._image, stepk_image, self.k_interpolant._i, self.gsparams._gsp)
+        with convert_cpp_errors():
+            self._sbiki = _galsim.SBInterpolatedKImage(
+                    self.kimage._image, stepk_image, self.k_interpolant._i, self.gsparams._gsp)
 
         scale = self.kimage.scale
         if scale != 1.:
-            return _galsim.SBTransform(self._sbiki, 1./scale, 0., 0., 1./scale,
-                                       _galsim.PositionD(0.,0.), scale**2,
-                                       self.gsparams._gsp)
+            with convert_cpp_errors():
+                return _galsim.SBTransform(self._sbiki, 1./scale, 0., 0., 1./scale,
+                                           _galsim.PositionD(0.,0.), scale**2,
+                                           self.gsparams._gsp)
         else:
             return self._sbiki
 

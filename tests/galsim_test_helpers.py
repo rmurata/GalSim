@@ -22,6 +22,7 @@ import os
 import sys
 import logging
 import coord
+import copy
 
 path, filename = os.path.split(__file__)
 try:
@@ -33,6 +34,21 @@ except ImportError:
 
 # This file has some helper functions that are used by tests from multiple files to help
 # avoid code duplication.
+
+# These are the default GSParams used when unspecified.  We'll check that specifying
+# these explicitly produces the same results.
+default_params = galsim.GSParams(
+        minimum_fft_size = 128,
+        maximum_fft_size = 8192,
+        folding_threshold = 5.e-3,
+        maxk_threshold = 1.e-3,
+        kvalue_accuracy = 1.e-5,
+        xvalue_accuracy = 1.e-5,
+        shoot_accuracy = 1.e-5,
+        realspace_relerr = 1.e-4,
+        realspace_abserr = 1.e-6,
+        integration_relerr = 1.e-6,
+        integration_abserr = 1.e-8)
 
 def gsobject_compare(obj1, obj2, conv=None, decimal=10):
     """Helper function to check that two GSObjects are equivalent
@@ -440,11 +456,11 @@ def do_pickle(obj1, func = lambda x : x, irreprable=False):
         #print(repr(obj1))
         with galsim.utilities.printoptions(precision=18, threshold=np.inf):
             obj5 = eval(repr(obj1))
-        print('obj1 = ',repr(obj1))
-        print('obj5 = ',repr(obj5))
+        #print('obj1 = ',repr(obj1))
+        #print('obj5 = ',repr(obj5))
         f5 = func(obj5)
-        print('f1 = ',f1)
-        print('f5 = ',f5)
+        #print('f1 = ',f1)
+        #print('f5 = ',f5)
         assert f5 == f1, "func(obj1) = %r\nfunc(obj5) = %r"%(f1, f5)
     else:
         # Even if we're not actually doing the test, still make the repr to check for syntax errors.
@@ -553,51 +569,6 @@ def all_obj_diff(objs, check_hash=True):
         raise e
 
 
-def check_chromatic_invariant(obj, bps=None, waves=None):
-    """ Helper function to check that ChromaticObjects satisfy intended invariants.
-    """
-    if bps is None:
-        # load a filter
-        bppath = os.path.join(galsim.meta_data.share_dir, 'bandpasses')
-        bandpass = (galsim.Bandpass(os.path.join(bppath, 'LSST_r.dat'), 'nm')
-                    .truncate(relative_throughput=1e-3)
-                    .thin(rel_err=1e-3))
-        bps = [bandpass]
-
-    if waves is None:
-        waves = [500.]
-
-    assert isinstance(obj.wave_list, np.ndarray)
-    assert isinstance(obj.separable, bool)
-    assert isinstance(obj.interpolated, bool)
-    assert isinstance(obj.deinterpolated, (galsim.ChromaticObject, galsim.GSObject))
-
-    for wave in waves:
-        desired = obj.SED(wave)
-        # Since InterpolatedChromaticObject.evaluateAtWavelength involves actually drawing an
-        # image, which implies flux can be lost off of the edges of the image, we don't expect
-        # its accuracy to be nearly as good as for other objects.
-        decimal = 2 if obj.interpolated else 7
-        np.testing.assert_almost_equal(obj.evaluateAtWavelength(wave).flux, desired,
-                                       decimal)
-        # Don't bother trying to draw a deconvolution.
-        if isinstance(obj, galsim.ChromaticDeconvolution):
-            continue
-        np.testing.assert_allclose(
-                obj.evaluateAtWavelength(wave).drawImage().array.sum(dtype=float),
-                desired,
-                rtol=1e-2)
-
-    if obj.SED.spectral:
-        for bp in bps:
-            calc_flux = obj.calculateFlux(bp)
-            np.testing.assert_equal(obj.SED.calculateFlux(bp), calc_flux)
-            np.testing.assert_allclose(calc_flux, obj.drawImage(bp).array.sum(dtype=float), rtol=1e-2)
-            # Also try manipulating exptime and area.
-            np.testing.assert_allclose(
-                    calc_flux * 10, obj.drawImage(bp, exptime=5, area=2).array.sum(dtype=float), rtol=1e-2)
-
-
 def funcname():
     import inspect
     return inspect.stack()[1][3]
@@ -692,3 +663,21 @@ else:
 
 del Dummy
 del _t
+
+# Context to make it easier to profile bits of the code
+class profile(object):
+    def __init__(self, sortby='tottime', nlines=30):
+        self.sortby = sortby
+        self.nlines = nlines
+
+    def __enter__(self):
+        import cProfile, pstats
+        self.pr = cProfile.Profile()
+        self.pr.enable()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        import pstats
+        self.pr.disable()
+        ps = pstats.Stats(self.pr).sort_stats(self.sortby)
+        ps.print_stats(self.nlines)

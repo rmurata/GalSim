@@ -28,21 +28,6 @@ path, filename = os.path.split(__file__)
 imgdir = os.path.join(path, "SBProfile_comparison_images") # Directory containing the reference
                                                            # images.
 
-# These are the default GSParams used when unspecified.  We'll check that specifying
-# these explicitly produces the same results.
-default_params = galsim.GSParams(
-        minimum_fft_size = 128,
-        maximum_fft_size = 4096,
-        folding_threshold = 5.e-3,
-        maxk_threshold = 1.e-3,
-        kvalue_accuracy = 1.e-5,
-        xvalue_accuracy = 1.e-5,
-        shoot_accuracy = 1.e-5,
-        realspace_relerr = 1.e-4,
-        realspace_abserr = 1.e-6,
-        integration_relerr = 1.e-6,
-        integration_abserr = 1.e-8)
-
 @timer
 def test_airy():
     """Test the generation of a specific Airy profile against a known result.
@@ -172,6 +157,13 @@ def test_airy_radii():
     assert_raises(AttributeError, getattr, test_gal_shear, "fwhm")
     assert_raises(AttributeError, getattr, test_gal_shear, "half_light_radius")
     assert_raises(AttributeError, getattr, test_gal_shear, "lam_over_diam")
+
+    # hlr and fwhm not implemented for obscuration != 0
+    airy2 = galsim.Airy(lam_over_diam= 1./0.8, flux=1., obscuration=0.2)
+    with assert_raises(galsim.GalSimNotImplementedError):
+        airy2.half_light_radius
+    with assert_raises(galsim.GalSimNotImplementedError):
+        airy2.fwhm
 
 
 @timer

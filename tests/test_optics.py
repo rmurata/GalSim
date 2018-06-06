@@ -297,7 +297,7 @@ def test_OpticalPSF_aberrations_kwargs():
     with assert_raises(ValueError):
         galsim.OpticalPSF(lod, aberrations=[0.0]*2)
     # The first element must be 0. (Just a warning!)
-    with assert_warns(UserWarning):
+    with assert_warns(galsim.GalSimWarning):
         galsim.OpticalPSF(lod, aberrations=[0.3]*8)
     # Cannot provide both aberrations and specific ones by name.
     with assert_raises(TypeError):
@@ -408,7 +408,7 @@ def test_OpticalPSF_pupil_plane():
                       .format(pp_file))
         im = galsim.Image(ref_psf._psf.aper.illuminated.astype(float))
         im.scale = ref_psf._psf.aper.pupil_plane_scale
-        print('pupil_plane image has scale = ',pp_scale)
+        print('pupil_plane image has scale = ',im.scale)
         im.write(os.path.join(imgdir, pp_file))
     pp_scale = im.scale
     print('pupil_plane image has scale = ',pp_scale)
@@ -417,8 +417,8 @@ def test_OpticalPSF_pupil_plane():
     # need it, and it is invalid to give lam_over_diam (rather than lam, diam separately) when
     # there is a specific scale for the pupil plane image.  But see the last test below where
     # we do use lam, diam separately with the input image.
-    im.scale = None
-    # This implies that the lam_over_diam value
+    im.wcs = None
+    # This implies that the lam_over_diam value is valid.
     test_psf = galsim.OpticalPSF(lam_over_diam, obscuration=obscuration,
                                  oversampling=pp_oversampling, pupil_plane_im=im,
                                  pad_factor=pp_pad_factor)
@@ -440,6 +440,23 @@ def test_OpticalPSF_pupil_plane():
     if do_slow_tests:
         do_pickle(test_psf, lambda x: x.drawImage(nx=20, ny=20, scale=0.07, method='no_pixel'))
         do_pickle(test_psf)
+
+    # Make a smaller pupil plane image to test the pickling of this, even without slow tests.
+    with assert_warns(galsim.GalSimWarning):
+        alt_psf = galsim.OpticalPSF(lam_over_diam, obscuration=obscuration,
+                                    oversampling=1., pupil_plane_im=im.bin(4,4),
+                                    pad_factor=1.)
+        do_pickle(alt_psf)
+
+    assert_raises(ValueError, galsim.OpticalPSF, lam_over_diam, pupil_plane_im='pp_file')
+    assert_raises(ValueError, galsim.OpticalPSF, lam_over_diam, pupil_plane_im=im,
+                  pupil_plane_scale=pp_scale)
+    assert_raises(ValueError, galsim.OpticalPSF, lam_over_diam,
+                  pupil_plane_im=im.view(scale=pp_scale))
+    assert_raises(ValueError, galsim.OpticalPSF, lam_over_diam,
+                  pupil_plane_im=galsim.Image(im.array[:-2,:]))
+    assert_raises(ValueError, galsim.OpticalPSF, lam_over_diam,
+                  pupil_plane_im=galsim.Image(im.array[:-1,:-1]))
 
     # It is supposed to be able to figure this out even if we *don't* tell it the pad factor. So
     # make sure that it still works even if we don't tell it that value.
@@ -563,21 +580,18 @@ def test_OpticalPSF_pupil_plane():
 
     # Supply the pupil plane at higher resolution, and make sure that the routine figures out the
     # sampling and gets the right image scale etc.
-    gsp = galsim.GSParams(maximum_fft_size=8192)
     rescale_fac = 0.77
     ref_psf = galsim.OpticalPSF(lam_over_diam, obscuration=obscuration, nstruts=nstruts,
                                 strut_angle=strut_angle, oversampling=pp_oversampling,
-                                pad_factor=pp_pad_factor/rescale_fac,
-                                gsparams=gsp)
+                                pad_factor=pp_pad_factor/rescale_fac)
     # Make higher resolution pupil plane image via interpolation
     int_im = galsim.InterpolatedImage(galsim.Image(im, scale=1.0, dtype=np.float32),
                                       calculate_maxk=False, calculate_stepk=False,
                                       x_interpolant='linear')
     new_im = int_im.drawImage(scale=rescale_fac, method='no_pixel')
-    new_im.scale = None  # Let OpticalPSF figure out the scale automatically.
+    new_im.wcs = None  # Let OpticalPSF figure out the scale automatically.
     test_psf = galsim.OpticalPSF(lam_over_diam, obscuration=obscuration,
-                                 pupil_plane_im=new_im, oversampling=pp_oversampling,
-                                 gsparams=gsp)
+                                 pupil_plane_im=new_im, oversampling=pp_oversampling)
     im_ref_psf = ref_psf.drawImage(scale=scale)
     im_test_psf = galsim.ImageD(im_ref_psf.array.shape[0], im_ref_psf.array.shape[1])
     im_test_psf = test_psf.drawImage(image=im_test_psf, scale=scale)
@@ -613,7 +627,7 @@ def test_OpticalPSF_pupil_plane():
     big_im[im.bounds] = im
     test_psf = galsim.OpticalPSF(lam_over_diam, obscuration=obscuration,
                                  pupil_plane_im=big_im, oversampling=pp_oversampling,
-                                 pad_factor=pp_pad_factor, gsparams=gsp)
+                                 pad_factor=pp_pad_factor)
     im_test_psf = galsim.ImageD(im_ref_psf.array.shape[0], im_ref_psf.array.shape[1])
     im_test_psf = test_psf.drawImage(image=im_test_psf, scale=scale)
     test_moments = im_test_psf.FindAdaptiveMom()

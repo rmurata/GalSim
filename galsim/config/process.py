@@ -752,6 +752,8 @@ def Process(config, logger=None, njobs=1, job=1, new_params=None, except_abort=F
     # Usually, this is just output.nfiles, but different output types may define this differently.
     nfiles = galsim.config.output.GetNFiles(config)
     logger.debug('nfiles = %d',nfiles)
+    #Setup up file_names config entry
+    config["output"]["_file_names"] = { file_num : { "file_name" : None, "extra" : {} } for file_num in range(nfiles) }
 
     if njobs > 1:
         # Start each job at file_num = nfiles * job / njobs
@@ -766,9 +768,9 @@ def Process(config, logger=None, njobs=1, job=1, new_params=None, except_abort=F
 
     if nfiles == 1:
         except_abort = True  # Mostly just so the message reads better.
-    file_info = galsim.config.BuildFiles(nfiles, config, file_num=start, logger=logger,
+    results, config_out = galsim.config.BuildFiles(nfiles, config, file_num=start, logger=logger,
                                          except_abort=except_abort)
-    return file_info
+    return config_out["output"]["_file_names"]
 
 def MultiProcess(nproc, config, job_func, tasks, item, logger=None,
                  done_func=None, except_func=None, except_abort=True):

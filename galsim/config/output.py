@@ -117,7 +117,7 @@ def BuildFiles(nfiles, config, file_num=0, logger=None, except_abort=False):
 
     def done_func(logger, proc, k, result, t2):
         file_num, file_name = info[k]
-        file_name2, t, _ = result  # This is the t for which 0 means the file was skipped.
+        file_name2, t = result  # This is the t for which 0 means the file was skipped.
         if file_name2 != file_name:  # pragma: no cover  (I think this should never happen.)
             raise galsim.GalSimError("Files seem to be out of sync. %s != %s",
                                      file_name, file_name2)
@@ -151,7 +151,7 @@ def BuildFiles(nfiles, config, file_num=0, logger=None, except_abort=False):
     if not results:  # pragma: no cover
         nfiles_written = 0
     else:
-        fnames, times, _ = zip(*results)
+        fnames, times = zip(*results)
         nfiles_written = sum([ t!=0 for t in times])
 
     if nfiles_written == 0:  # pragma: no cover
@@ -161,7 +161,7 @@ def BuildFiles(nfiles, config, file_num=0, logger=None, except_abort=False):
             logger.warning('Total time for %d files with %d processes = %f sec',
                            nfiles_written,nproc,t2-t1)
         logger.warning('Done building files')
-    return results
+    return results, orig_config
 
 
 output_ignore = [ 'nproc', 'skip', 'noclobber', 'retry_io' ]
@@ -250,7 +250,10 @@ def BuildFile(config, file_num=0, image_num=0, obj_num=0, logger=None):
     extra_filenames = builder.writeExtraOutputs(config, data, logger)
     t2 = time.time()
 
-    return file_name, t2-t1, extra_filenames
+    #Add file_name to config["output"]["_file_names"]
+    config["output"]["_file_names"][file_num]["file_name"] = file_name
+
+    return file_name, t2-t1
 
 def GetNFiles(config):
     """

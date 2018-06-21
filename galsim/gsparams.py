@@ -131,22 +131,22 @@ class GSParams(object):
                  integration_relerr=1.e-6, integration_abserr=1.e-8,
                  shoot_accuracy=1.e-5, allowed_flux_variation=0.81,
                  range_division_for_extrema=32, small_fraction_of_flux=1.e-4):
-        self._minimum_fft_size = minimum_fft_size
-        self._maximum_fft_size = maximum_fft_size
-        self._folding_threshold = folding_threshold
-        self._stepk_minimum_hlr = stepk_minimum_hlr
-        self._maxk_threshold = maxk_threshold
-        self._kvalue_accuracy = kvalue_accuracy
-        self._xvalue_accuracy = xvalue_accuracy
-        self._table_spacing = table_spacing
-        self._realspace_relerr = realspace_relerr
-        self._realspace_abserr = realspace_abserr
-        self._integration_relerr = integration_relerr
-        self._integration_abserr = integration_abserr
-        self._shoot_accuracy = shoot_accuracy
-        self._allowed_flux_variation = allowed_flux_variation
-        self._range_division_for_extrema = range_division_for_extrema
-        self._small_fraction_of_flux = small_fraction_of_flux
+        self._minimum_fft_size = int(minimum_fft_size)
+        self._maximum_fft_size = int(maximum_fft_size)
+        self._folding_threshold = float(folding_threshold)
+        self._stepk_minimum_hlr = float(stepk_minimum_hlr)
+        self._maxk_threshold = float(maxk_threshold)
+        self._kvalue_accuracy = float(kvalue_accuracy)
+        self._xvalue_accuracy = float(xvalue_accuracy)
+        self._table_spacing = int(table_spacing)
+        self._realspace_relerr = float(realspace_relerr)
+        self._realspace_abserr = float(realspace_abserr)
+        self._integration_relerr = float(integration_relerr)
+        self._integration_abserr = float(integration_abserr)
+        self._shoot_accuracy = float(shoot_accuracy)
+        self._allowed_flux_variation = float(allowed_flux_variation)
+        self._range_division_for_extrema = int(range_division_for_extrema)
+        self._small_fraction_of_flux = float(small_fraction_of_flux)
 
         # This is the thing that is needed for any c++ calls.
         with convert_cpp_errors():
@@ -199,6 +199,35 @@ class GSParams(object):
             raise TypeError("Invalid GSParams: %s"%gsparams)
         else:
             return gsparams
+
+    @staticmethod
+    def combine(gsp_list):
+        """Combine a list of GSParams instances using the most restrictive parameter from each.
+
+        Uses the minimum value for most parameters. For the following parameters, it uses the
+        maximum numerical value: minimum_fft_size, maximum_fft_size, stepk_minimum_hlr,
+        allowed_flux_variation, range_division_for_extrema.
+        """
+        if len(gsp_list) == 1:
+            return gsp_list[0]
+        else:
+            return GSParams(
+                max([g.minimum_fft_size for g in gsp_list]),
+                max([g.maximum_fft_size for g in gsp_list]),
+                min([g.folding_threshold for g in gsp_list]),
+                max([g.stepk_minimum_hlr for g in gsp_list]),
+                min([g.maxk_threshold for g in gsp_list]),
+                min([g.kvalue_accuracy for g in gsp_list]),
+                min([g.xvalue_accuracy for g in gsp_list]),
+                min([g.table_spacing for g in gsp_list]),
+                min([g.realspace_relerr for g in gsp_list]),
+                min([g.realspace_abserr for g in gsp_list]),
+                min([g.integration_relerr for g in gsp_list]),
+                min([g.integration_abserr for g in gsp_list]),
+                min([g.shoot_accuracy for g in gsp_list]),
+                max([g.allowed_flux_variation for g in gsp_list]),
+                max([g.range_division_for_extrema for g in gsp_list]),
+                min([g.small_fraction_of_flux for g in gsp_list]))
 
     # Define once the order of args in __init__, since we use it a few times.
     def _getinitargs(self):

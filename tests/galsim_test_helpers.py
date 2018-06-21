@@ -54,8 +54,8 @@ def gsobject_compare(obj1, obj2, conv=None, decimal=10):
     """Helper function to check that two GSObjects are equivalent
     """
     if conv:
-        obj1 = galsim.Convolve([obj1,conv])
-        obj2 = galsim.Convolve([obj2,conv])
+        obj1 = galsim.Convolve([obj1,conv.withGSParams(obj1.gsparams)])
+        obj2 = galsim.Convolve([obj2,conv.withGSParams(obj2.gsparams)])
 
     im1 = galsim.ImageD(16,16)
     im2 = galsim.ImageD(16,16)
@@ -229,6 +229,17 @@ def check_basic(prof, name, approx_maxsb=False, scale=None, do_x=True, do_k=True
     assert isinstance(prof.is_axisymmetric, bool)
     assert isinstance(prof.is_analytic_x, bool)
     assert isinstance(prof.is_analytic_k, bool)
+
+    # When made with the same gsparams, it returns itself
+    assert prof.withGSParams(prof.gsparams) is prof
+    alt_gsp = galsim.GSParams(xvalue_accuracy=0.2, folding_threshold=0.03)
+    prof_alt = prof.withGSParams(alt_gsp)
+    assert isinstance(prof_alt, prof.__class__)
+    assert prof_alt.gsparams == alt_gsp
+    assert prof_alt != prof  # Assuming none of our tests use this exact gsparams choice.
+    # Back to the original, ==, but not is
+    assert prof_alt.withGSParams(prof.gsparams) is not prof
+    assert prof_alt.withGSParams(prof.gsparams) == prof
 
     # Repeat for a rotated version of the profile.
     # The rotated version is mathematically the same for most profiles (all axisymmetric ones),

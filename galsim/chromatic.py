@@ -32,7 +32,7 @@ from .gsobject import GSObject
 from .sed import SED
 from .bandpass import Bandpass
 from .position import PositionD, PositionI
-from .utilities import lazy_property
+from .utilities import lazy_property, doc_inherit
 from .gsparams import GSParams
 from . import utilities
 from . import integ
@@ -172,6 +172,22 @@ class ChromaticObject(object):
         self.interpolated = obj.interpolated
         self.wave_list = obj.wave_list
         self.deinterpolated = obj.deinterpolated
+
+    @property
+    def gsparams(self):
+        return self._obj.gsparams
+
+    def withGSParams(self, gsparams):
+        """Create a version of the current object with the given gsparams
+
+        Note: if this object wraps other objects (e.g. Convolution, Sum, Transformation, etc.)
+        those component objects will also have their gsparams updated to the new value.
+        """
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._obj = self._obj.withGSParams(gsparams)
+        return ret
 
     @staticmethod
     def _get_multiplier(sed, bandpass, wave_list):
@@ -1043,7 +1059,9 @@ class InterpolatedChromaticObject(ChromaticObject):
 
         # Don't interpolate an interpolation.  Go back to the original.
         self.deinterpolated = original.deinterpolated
+        self._build_objs()
 
+    def _build_objs(self):
         # Make the objects between which we are going to interpolate.  Note that these do not have
         # to be saved for later, unlike the images.
         objs = [ self.deinterpolated.evaluateAtWavelength(wave) for wave in self.waves ]
@@ -1051,7 +1069,7 @@ class InterpolatedChromaticObject(ChromaticObject):
         # Find the Nyquist scale for each, and to be safe, choose the minimum value to use for the
         # array of images that is being stored.
         nyquist_scale_vals = [ obj.nyquist_scale for obj in objs ]
-        scale = np.min(nyquist_scale_vals) / oversample_fac
+        scale = np.min(nyquist_scale_vals) / self.oversample
 
         # Find the suggested image size for each object given the choice of scale, and use the
         # maximum just to be safe.
@@ -1068,6 +1086,19 @@ class InterpolatedChromaticObject(ChromaticObject):
         self.ims = [ obj.drawImage(scale=scale, nx=im_size, ny=im_size, method='no_pixel')
                      for obj in objs ]
         self.fluxes = [ obj.flux for obj in objs ]
+
+    @property
+    def gsparams(self):
+        return self.deinterpolated.gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret.deinterpolated = self.deinterpolated.withGSParams(gsparams)
+        ret._build_objs()
+        return ret
 
     def __eq__(self, other):
         return (isinstance(other, InterpolatedChromaticObject) and
@@ -1329,6 +1360,7 @@ class ChromaticAtmosphere(ChromaticObject):
 
         self.base_obj = base_obj
         self.base_wavelength = base_wavelength
+        self._gsparams = base_obj.gsparams
 
         if scale_unit is None:
             scale_unit = arcsec
@@ -1346,6 +1378,18 @@ class ChromaticAtmosphere(ChromaticObject):
 
         self.base_refraction = dcr.get_refraction(self.base_wavelength, self.zenith_angle,
                                                   **self.kw)
+
+    @property
+    def gsparams(self):
+        return self.base_obj.gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret.base_obj = self.base_obj.withGSParams(gsparams)
+        return ret
 
     def __eq__(self, other):
         return (isinstance(other, ChromaticAtmosphere) and
@@ -1436,8 +1480,12 @@ class ChromaticTransformation(ChromaticObject):
     @param flux_ratio       A factor by which to multiply the flux of the object. [default: 1]
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
-    def __init__(self, obj, jac=np.identity(2), offset=(0.,0.), flux_ratio=1., gsparams=None):
+    def __init__(self, obj, jac=np.identity(2), offset=(0.,0.), flux_ratio=1., gsparams=None,
+                 propagate_gsparams=True):
         if isinstance(offset, PositionD) or isinstance(offset, PositionI):
             offset = (offset.x, offset.y)
         if not hasattr(jac,'__call__'):
@@ -1471,8 +1519,15 @@ class ChromaticTransformation(ChromaticObject):
             obj = obj.deinterpolated
         self.interpolated = obj.interpolated
 
+        self._gsparams = GSParams.check(gsparams, obj.gsparams)
+        self._propagate_gsparams = propagate_gsparams
+        if self._propagate_gsparams:
+            self._original = obj.withGSParams(self._gsparams)
+        else:
+            self._original = obj
+
         if isinstance(obj, ChromaticTransformation):
-            self.original = obj.original
+            self._original = obj.original
 
             @utilities.functionize
             def new_jac(jac1, jac2):
@@ -1486,32 +1541,50 @@ class ChromaticTransformation(ChromaticObject):
             self._offset = new_offset(jac, obj._offset, offset)
             self._flux_ratio = obj._flux_ratio * flux_ratio
         else:
-            self.original = obj
             self._jac = jac
             self._offset = offset
             self._flux_ratio = flux_ratio
 
         self.wave_list, _, _ = utilities.combine_wave_list(self.original, self.SED)
 
-        if gsparams is None:
-            self.gsparams = self.original.gsparams if hasattr(self.original, 'gsparams') else None
-        else:
-            self.gsparams = GSParams.check(gsparams)
-
         if self.interpolated:
             self.deinterpolated = ChromaticTransformation(
-                    self.original.deinterpolated,
+                    self._original.deinterpolated,
                     jac = self._jac,
                     offset = self._offset,
                     flux_ratio = self._flux_ratio,
-                    gsparams = self.gsparams)
+                    gsparams = self._gsparams,
+                    propagate_gsparams = self._propagate_gsparams)
         else:
             self.deinterpolated = self
+
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._original = self._original.withGSParams(ret._gsparams)
+        if self.interpolated:
+            ret.deinterpolated = self.deinterpolated.withGSParams(ret._gsparams)
+        else:
+            ret.deinterpolated = ret
+        return ret
+
+    @property
+    def original(self):
+        return self._original
 
     def __eq__(self, other):
         if not (isinstance(other, ChromaticTransformation) and
                 self.original == other.original and
-                self.gsparams == other.gsparams):
+                self._gsparams == other._gsparams and
+                self._propagate_gsparams == other._propagate_gsparams):
             return False
         # There's really no good way to check that two callables are equal, except if they literally
         # point to the same object.  So we'll just check for that for _jac, _offset, _flux_ratio.
@@ -1534,7 +1607,8 @@ class ChromaticTransformation(ChromaticObject):
     def __hash__(self):
         # This one's a bit complicated, so we'll go ahead and cache the hash.
         if not hasattr(self, '_hash'):
-            self._hash = hash(("galsim.ChromaticTransformation", self.original, self.gsparams))
+            self._hash = hash(("galsim.ChromaticTransformation", self.original, self._gsparams,
+                               self._propagate_gsparams))
             # achromatic _jac and _offset are ndarrays, so need to be handled separately.
             for attr in ('_jac', '_offset', '_flux_ratio'):
                 selfattr = getattr(self, attr)
@@ -1553,8 +1627,9 @@ class ChromaticTransformation(ChromaticObject):
             offset = self._offset
         else:
             offset = PositionD(*(self._offset.tolist()))
-        return 'galsim.ChromaticTransformation(%r, jac=%r, offset=%r, flux_ratio=%r, gsparams=%r)'%(
-            self.original, jac, offset, self._flux_ratio, self.gsparams)
+        return ('galsim.ChromaticTransformation(%r, jac=%r, offset=%r, flux_ratio=%r, '
+                'gsparams=%r, propagate_gsparams=%r)')%(
+            self.original, jac, offset, self._flux_ratio, self._gsparams, self._propagate_gsparams)
 
     def __str__(self):
         from .transform import Transformation
@@ -1594,7 +1669,7 @@ class ChromaticTransformation(ChromaticObject):
         ret = self.original.evaluateAtWavelength(wave)
         jac, offset, flux_ratio = self._getTransformations(wave)
         return Transformation(ret, jac=jac, offset=offset, flux_ratio=flux_ratio,
-                              gsparams=self.gsparams)
+                              gsparams=self._gsparams, propagate_gsparams=self._propagate_gsparams)
 
     def drawImage(self, bandpass, image=None, integrator='trapezoidal', **kwargs):
         """
@@ -1635,7 +1710,8 @@ class ChromaticTransformation(ChromaticObject):
             # Get shape transformations at bandpass.red_limit (they are achromatic so it doesn't
             # matter where you get them).
             jac, offset, _ = self._getTransformations(bandpass.red_limit)
-            int_im = Transform(int_im, jac=jac, offset=offset, gsparams=self.gsparams)
+            int_im = Transform(int_im, jac=jac, offset=offset, gsparams=self._gsparams,
+                               propagate_gsparams=self._propagate_gsparams)
             image = int_im.drawImage(image=image, **kwargs)
             self._last_wcs = image.wcs
             return image
@@ -1690,10 +1766,14 @@ class ChromaticSum(ChromaticObject):
     @param args             Unnamed args should be a list of objects to add.
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
     def __init__(self, *args, **kwargs):
         # Check kwargs first:
-        self.gsparams = kwargs.pop("gsparams", None)
+        gsparams = kwargs.pop("gsparams", None)
+        self._propagate_gsparams = kwargs.pop("propagate_gsparams", True)
 
         # Make sure there is nothing left in the dict.
         if kwargs:
@@ -1714,10 +1794,18 @@ class ChromaticSum(ChromaticObject):
                                 " or list of them.")
         # else args is already the list of objects
 
+        # Figure out what gsparams to use
+        if gsparams is None:
+            # If none is given, take the most restrictive combination from the obj_list.
+            self._gsparams = GSParams.combine([obj.gsparams for obj in args])
+        else:
+            # If something explicitly given, then use that.
+            self._gsparams = GSParams.check(gsparams)
+
         self.interpolated = any(arg.interpolated for arg in args)
         if self.interpolated:
             self.deinterpolated = ChromaticSum([arg.deinterpolated for arg in args],
-                                               gsparams = self.gsparams)
+                                               gsparams=self._gsparams)
         else:
             self.deinterpolated = self
 
@@ -1734,25 +1822,27 @@ class ChromaticSum(ChromaticObject):
         # impossible to identify if two SEDs are proportional (or even equal) unless they point to
         # the same memory, so we just accept this limitation.
 
-        # Each input summand will either end up in SED_dict if it's separable, or in self.obj_list
+        # Each input summand will either end up in SED_dict if it's separable, or in self._obj_list
         # if it's inseparable.  Use an OrderedDict to ensure deterministic results.
         from collections import OrderedDict
         SED_dict = OrderedDict()
-        self.obj_list = []
+        self._obj_list = []
         for obj in args:
+            if self._propagate_gsparams:
+                obj = obj.withGSParams(self._gsparams)
             if obj.separable:
                 if obj.SED not in SED_dict:
                     SED_dict[obj.SED] = []
                 SED_dict[obj.SED].append(obj)
             else:
-                self.obj_list.append(obj)
+                self._obj_list.append(obj)
 
-        # If everything ended up in a single SED_dict entry (and self.obj_list is empty) then this
+        # If everything ended up in a single SED_dict entry (and self._obj_list is empty) then this
         # ChromaticSum is separable.
-        self.separable = (len(self.obj_list) == 0 and len(SED_dict) == 1)
+        self.separable = (len(self._obj_list) == 0 and len(SED_dict) == 1)
         if self.separable:
             the_one_SED = list(SED_dict)[0]
-            self.obj_list = SED_dict[the_one_SED]
+            self._obj_list = SED_dict[the_one_SED]
             # Since we know that the chromatic objects' SEDs already include all relevant
             # normalizations, we can just multiply the_one_SED by the number of objects.
             self.SED = the_one_SED * len(SED_dict[the_one_SED])
@@ -1760,26 +1850,46 @@ class ChromaticSum(ChromaticObject):
             # Sum is not separable, put partial sums might be.  Search for them.
             for v in SED_dict.values():
                 if len(v) == 1:
-                    self.obj_list.append(v[0])
+                    self._obj_list.append(v[0])
                 else:
-                    self.obj_list.append(ChromaticSum(v))
+                    self._obj_list.append(ChromaticSum(v))
             # and assemble self normalization:
-            self.SED = self.obj_list[0].SED
-            for obj in self.obj_list[1:]:
+            self.SED = self._obj_list[0].SED
+            for obj in self._obj_list[1:]:
                 self.SED += obj.SED
 
-        self.wave_list, _, _ = utilities.combine_wave_list(self.obj_list)
+        self.wave_list, _, _ = utilities.combine_wave_list(self._obj_list)
+
+    @property
+    def gsparams(self):
+        return self._gsparams
+    @property
+    def obj_list(self):
+        return self._obj_list
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj_list = [ obj.withGSParams(gsparams) for obj in self.obj_list ]
+        return ret
 
     def __eq__(self, other):
         return (isinstance(other, ChromaticSum) and
                 self.obj_list == other.obj_list and
-                self.gsparams == other.gsparams)
+                self._gsparams == other._gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticSum", tuple(self.obj_list), self.gsparams))
+        return hash(("galsim.ChromaticSum", tuple(self.obj_list), self._gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        return 'galsim.ChromaticSum(%r, gsparams=%r)'%(self.obj_list, self.gsparams)
+        return 'galsim.ChromaticSum(%r, gsparams=%r, propagate_gsparams=%r)'%(
+                self.obj_list, self._gsparams, self._propagate_gsparams)
 
     def __str__(self):
         str_list = [ str(obj) for obj in self.obj_list ]
@@ -1794,7 +1904,7 @@ class ChromaticSum(ChromaticObject):
         """
         from .sum import Add
         return Add([obj.evaluateAtWavelength(wave) for obj in self.obj_list],
-                   gsparams=self.gsparams)
+                   gsparams=self._gsparams, propagate_gsparams=self._propagate_gsparams)
 
     def drawImage(self, bandpass, image=None, integrator='trapezoidal', **kwargs):
         """Slightly optimized draw method for ChromaticSum instances.
@@ -1875,6 +1985,9 @@ class ChromaticConvolution(ChromaticObject):
                             edges.]
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
     def __init__(self, *args, **kwargs):
         # First check for number of arguments != 0
@@ -1898,7 +2011,16 @@ class ChromaticConvolution(ChromaticObject):
         if real_space:
             raise GalSimNotImplementedError(
                 "Real space convolution of chromatic objects not implemented.")
-        self.gsparams = kwargs.pop("gsparams", None)
+        gsparams = kwargs.pop("gsparams", None)
+        self._propagate_gsparams = kwargs.pop("propagate_gsparams", True)
+
+        # Figure out what gsparams to use
+        if gsparams is None:
+            # If none is given, take the most restrictive combination from the obj_list.
+            self._gsparams = GSParams.combine([obj.gsparams for obj in args])
+        else:
+            # If something explicitly given, then use that.
+            self._gsparams = GSParams.check(gsparams)
 
         # Make sure there is nothing left in the dict.
         if kwargs:
@@ -1913,19 +2035,22 @@ class ChromaticConvolution(ChromaticObject):
         for obj in args[1:]:
             self.SED *= obj.SED
 
-        self.obj_list = []
+        self._obj_list = []
         # Unfold convolution of convolution.
         for obj in args:
+            if self._propagate_gsparams:
+                obj = obj.withGSParams(self._gsparams)
             if isinstance(obj, ChromaticConvolution):
-                self.obj_list.extend(obj.obj_list)
+                self._obj_list.extend(obj.obj_list)
             else:
-                self.obj_list.append(obj)
+                self._obj_list.append(obj)
 
-        self.separable = all(obj.separable for obj in self.obj_list)
-        self.interpolated = any(obj.interpolated for obj in self.obj_list)
+        self.separable = all(obj.separable for obj in self._obj_list)
+        self.interpolated = any(obj.interpolated for obj in self._obj_list)
         if self.interpolated:
-            self.deinterpolated = ChromaticConvolution([obj.deinterpolated for obj in self.obj_list],
-                                                       gsparams=self.gsparams)
+            self.deinterpolated = ChromaticConvolution(
+                    [obj.deinterpolated for obj in self._obj_list],
+                    gsparams=self._gsparams, propagate_gsparams=self._propagate_gsparams)
         else:
             self.deinterpolated = self
 
@@ -1937,7 +2062,7 @@ class ChromaticConvolution(ChromaticObject):
         # here.
         n_nonsep = 0
         n_interp = 0
-        for obj in self.obj_list:
+        for obj in self._obj_list:
             if not obj.separable and not isinstance(obj, ChromaticSum): n_nonsep += 1
             if obj.interpolated: n_interp += 1
         if n_nonsep>1 and n_interp>0:
@@ -1946,7 +2071,24 @@ class ChromaticConvolution(ChromaticObject):
                 "interpolation-related optimization.  Will use full profile evaluation.")
 
         # Assemble wave_lists
-        self.wave_list, _, _ = utilities.combine_wave_list(self.obj_list)
+        self.wave_list, _, _ = utilities.combine_wave_list(self._obj_list)
+
+    @property
+    def gsparams(self):
+        return self._gsparams
+    @property
+    def obj_list(self):
+        return self._obj_list
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj_list = [ obj.withGSParams(gsparams) for obj in self.obj_list ]
+        return ret
 
     @staticmethod
     def _get_effective_prof(insep_obj, bandpass, iimult, integrator, gsparams):
@@ -1983,13 +2125,16 @@ class ChromaticConvolution(ChromaticObject):
     def __eq__(self, other):
         return (isinstance(other, ChromaticConvolution) and
                 self.obj_list == other.obj_list and
-                self.gsparams == other.gsparams)
+                self._gsparams == other._gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticConvolution", tuple(self.obj_list), self.gsparams))
+        return hash(("galsim.ChromaticConvolution", tuple(self.obj_list), self._gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        return 'galsim.ChromaticConvolution(%r, gsparams=%r)'%(self.obj_list, self.gsparams)
+        return 'galsim.ChromaticConvolution(%r, gsparams=%r, propagate_gsparams=%r)'%(
+                self.obj_list, self._gsparams, self._propagate_gsparams)
 
     def __str__(self):
         str_list = [ str(obj) for obj in self.obj_list ]
@@ -2004,7 +2149,7 @@ class ChromaticConvolution(ChromaticObject):
         """
         from .convolve import Convolve
         return Convolve([obj.evaluateAtWavelength(wave) for obj in self.obj_list],
-                        gsparams=self.gsparams)
+                        gsparams=self._gsparams, propagate_gsparams=self._propagate_gsparams)
 
     def drawImage(self, bandpass, image=None, integrator='trapezoidal', iimult=None, **kwargs):
         """Optimized draw method for the ChromaticConvolution class.
@@ -2135,7 +2280,8 @@ class ChromaticConvolution(ChromaticObject):
         if len(insep_obj) == 1:
             insep_obj = insep_obj[0]
         else:
-            insep_obj = Convolve(insep_obj, gsparams=self.gsparams)
+            insep_obj = Convolve(insep_obj, gsparams=self._gsparams,
+                                 propagate_gsparams=self._propagate_gsparams)
 
         sep_profs = []
         for obj in self.obj_list:
@@ -2148,13 +2294,13 @@ class ChromaticConvolution(ChromaticObject):
         # Collapse inseparable profiles and chromatic normalizations into one effective profile
         # Note that at this point, insep_obj.SED should *not* be None.
         effective_prof = ChromaticConvolution._effective_prof_cache(
-                insep_obj, bandpass, iimult,
-                integrator, self.gsparams)
+                insep_obj, bandpass, iimult, integrator, self._gsparams)
 
         # append effective profile to separable profiles (which should all be GSObjects)
         sep_profs.append(effective_prof)
         # finally, convolve and draw.
-        final_prof = Convolve(sep_profs, gsparams=self.gsparams)
+        final_prof = Convolve(sep_profs, gsparams=self._gsparams,
+                              propagate_gsparams=self._propagate_gsparams)
         image = final_prof.drawImage(image=image, **kwargs)
         self._last_wcs = image.wcs
         return image
@@ -2196,32 +2342,56 @@ class ChromaticDeconvolution(ChromaticObject):
     @param obj              The object to deconvolve.
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, gsparams=None, propagate_gsparams=True):
         if not obj.SED.dimensionless:
             raise GalSimSEDError("Cannot deconvolve by spectral ChromaticObject.", obj.SED)
-        self._obj = obj
-        self.kwargs = kwargs
+        self._gsparams = GSParams.check(gsparams, obj.gsparams)
+        self._propagate_gsparams = propagate_gsparams
+        if self._propagate_gsparams:
+            self._obj = obj.withGSParams(self._gsparams)
+        else:
+            self._obj = obj
         self.separable = obj.separable
         self.interpolated = obj.interpolated
         if self.interpolated:
-            self.deinterpolated = ChromaticDeconvolution(self._obj.deinterpolated, **self.kwargs)
+            self.deinterpolated = ChromaticDeconvolution(self._obj.deinterpolated, self._gsparams,
+                                                         self._propagate_gsparams)
         else:
             self.deinterpolated = self
         self.SED = SED(lambda w: 1./obj.SED(w), 'nm', '1')
         self.wave_list = obj.wave_list
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj = self._obj.withGSParams(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticDeconvolution) and
                 self._obj == other._obj and
-                self.kwargs == other.kwargs)
+                self.gsparams == other.gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticDeconvolution", self._obj, frozenset(self.kwargs.items())))
+        return hash(("galsim.ChromaticDeconvolution", self._obj, self.gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        kwargs_str = ', '.join('%s=%s'%(k,v) for k,v in self.kwargs.items())
-        return 'galsim.ChromaticDeconvolution(%r, %s)'%(self._obj, kwargs_str)
+        return 'galsim.ChromaticDeconvolution(%r, gsparams=%r, propagate_gsparams=%r)'%(
+                self._obj, self.gsparams, self._propagate_gsparams)
 
     def __str__(self):
         return 'galsim.ChromaticDeconvolution(%s)'%self._obj
@@ -2234,7 +2404,8 @@ class ChromaticDeconvolution(ChromaticObject):
         @returns the monochromatic object at the given wavelength.
         """
         from .convolve import Deconvolve
-        return Deconvolve(self._obj.evaluateAtWavelength(wave), **self.kwargs)
+        return Deconvolve(self._obj.evaluateAtWavelength(wave), gsparams=self.gsparams,
+                          propagate_gsparams=self._propagate_gsparams)
 
 
 class ChromaticAutoConvolution(ChromaticObject):
@@ -2252,32 +2423,59 @@ class ChromaticAutoConvolution(ChromaticObject):
                             edges.]
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, real_space=None, gsparams=None, propagate_gsparams=True):
         if not obj.SED.dimensionless:
             raise GalSimSEDError("Cannot autoconvolve spectral ChromaticObject.", obj.SED)
-        self._obj = obj
-        self.kwargs = kwargs
+        self._gsparams = GSParams.check(gsparams, obj.gsparams)
+        self._propagate_gsparams = propagate_gsparams
+        if self._propagate_gsparams:
+            self._obj = obj.withGSParams(self._gsparams)
+        else:
+            self._obj = obj
+        self._real_space = real_space
         self.separable = obj.separable
         self.interpolated = obj.interpolated
         if self.interpolated:
-            self.deinterpolated = ChromaticAutoConvolution(self._obj.deinterpolated, **self.kwargs)
+            self.deinterpolated = ChromaticAutoConvolution(self._obj.deinterpolated, real_space,
+                                                           self._gsparams, self._propagate_gsparams)
         else:
             self.deinterpolated = self
         self.SED = obj.SED * obj.SED
         self.wave_list = obj.wave_list
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj = self._obj.withGSParams(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticAutoConvolution) and
                 self._obj == other._obj and
-                self.kwargs == other.kwargs)
+                self._real_space == other._real_space and
+                self.gsparams == other.gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticAutoConvolution", self._obj, frozenset(self.kwargs.items())))
+        return hash(("galsim.ChromaticAutoConvolution", self._obj, self._real_space, self.gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        kwargs_str = ', '.join('%s=%s'%(k,v) for k,v in self.kwargs.items())
-        return 'galsim.ChromaticAutoConvolution(%r, %s)'%(self._obj, kwargs_str)
+        return ('galsim.ChromaticAutoConvolution(%r, real_space=%r, gsparams=%r, '
+                'propagate_gsparams=%r)')%(
+                self._obj, self._real_space, self.gsparams, self._propagate_gsparams)
 
     def __str__(self):
         return 'galsim.ChromaticAutoConvolution(%s)'%self._obj
@@ -2290,7 +2488,8 @@ class ChromaticAutoConvolution(ChromaticObject):
         @returns the monochromatic object at the given wavelength.
         """
         from .convolve import AutoConvolve
-        return AutoConvolve(self._obj.evaluateAtWavelength(wave), **self.kwargs)
+        return AutoConvolve(self._obj.evaluateAtWavelength(wave), self._real_space, self._gsparams,
+                            self._propagate_gsparams)
 
 
 class ChromaticAutoCorrelation(ChromaticObject):
@@ -2309,32 +2508,60 @@ class ChromaticAutoCorrelation(ChromaticObject):
                             edges.]
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, real_space=None, gsparams=None, propagate_gsparams=True):
         if not obj.SED.dimensionless:
             raise GalSimSEDError("Cannot autocorrelate spectral ChromaticObject.", obj.SED)
-        self._obj = obj
-        self.kwargs = kwargs
+        self._gsparams = GSParams.check(gsparams, obj.gsparams)
+        self._propagate_gsparams = propagate_gsparams
+        if self._propagate_gsparams:
+            self._obj = obj.withGSParams(self._gsparams)
+        else:
+            self._obj = obj
+        self._real_space = real_space
         self.separable = obj.separable
         self.interpolated = obj.interpolated
         if self.interpolated:
-            self.deinterpolated = ChromaticAutoCorrelation(self._obj.deinterpolated, **self.kwargs)
+            self.deinterpolated = ChromaticAutoCorrelation(self._obj.deinterpolated,
+                                                           self._real_space, self._gsparams,
+                                                           self._propagate_gsparams)
         else:
             self.deinterpolated = self
         self.SED = obj.SED * obj.SED
         self.wave_list = obj.wave_list
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj = self._obj.withGSParams(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticAutoCorrelation) and
                 self._obj == other._obj and
-                self.kwargs == other.kwargs)
+                self._real_space == other._real_space and
+                self.gsparams == other.gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticAutoCorrelation", self._obj, frozenset(self.kwargs.items())))
+        return hash(("galsim.ChromaticAutoCorrelation", self._obj, self._real_space, self.gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        kwargs_str = ', '.join('%s=%s'%(k,v) for k,v in self.kwargs.items())
-        return 'galsim.ChromaticAutoCorrelation(%r, %s)'%(self._obj, kwargs_str)
+        return ('galsim.ChromaticAutoCorrelation(%r, real_space=%r, gsparams=%r, '
+                'propagate_gsparams=%r)')%(
+                self._obj, self._real_space, self.gsparams, self._propagate_gsparams)
 
     def __str__(self):
         return 'galsim.ChromaticAutoCorrelation(%s)'%self._obj
@@ -2347,7 +2574,8 @@ class ChromaticAutoCorrelation(ChromaticObject):
         @returns the monochromatic object at the given wavelength.
         """
         from .convolve import AutoCorrelate
-        return AutoCorrelate(self._obj.evaluateAtWavelength(wave), **self.kwargs)
+        return AutoCorrelate(self._obj.evaluateAtWavelength(wave), self._real_space, self.gsparams,
+                             self._propagate_gsparams)
 
 
 class ChromaticFourierSqrtProfile(ChromaticObject):
@@ -2374,35 +2602,57 @@ class ChromaticFourierSqrtProfile(ChromaticObject):
     @param obj              The object to compute the Fourier-space square root of.
     @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
                             details. [default: None]
+    @param propagate_gsparams   Whether to propagate gsparams to each of the components.  This
+                                is normally a good idea, but there may be use cases where one
+                                would not want to do this. [default: True]
     """
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, gsparams=None, propagate_gsparams=True):
         import math
         if not obj.SED.dimensionless:
             raise GalSimSEDError("Cannot take Fourier sqrt of spectral ChromaticObject.", obj.SED)
-        self._obj = obj
-        self.kwargs = kwargs
+        self._gsparams = GSParams.check(gsparams, obj.gsparams)
+        self._propagate_gsparams = propagate_gsparams
+        if self._propagate_gsparams:
+            self._obj = obj.withGSParams(self._gsparams)
+        else:
+            self._obj = obj
         self.separable = obj.separable
         self.interpolated = obj.interpolated
         if self.interpolated:
             self.deinterpolated = ChromaticFourierSqrtProfile(
-                    self._obj.deinterpolated, **self.kwargs)
+                    self._obj.deinterpolated, self._gsparams, self._propagate_gsparams)
         else:
             self.deinterpolated = self
         self.SED = SED(lambda w:math.sqrt(obj.SED(w)), 'nm', '1')
         self.wave_list = obj.wave_list
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        if self._propagate_gsparams:
+            ret._obj = self._obj.withGSParams(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticFourierSqrtProfile) and
                 self._obj == other._obj and
-                self.kwargs == other.kwargs)
+                self.gsparams == other.gsparams and
+                self._propagate_gsparams == other._propagate_gsparams)
 
     def __hash__(self):
-        return hash(("galsim.ChromaticFourierSqrtProfile", self._obj,
-                     frozenset(self.kwargs.items())))
+        return hash(("galsim.ChromaticFourierSqrtProfile", self._obj, self.gsparams,
+                     self._propagate_gsparams))
 
     def __repr__(self):
-        kwargs_str = ', '.join('%s=%s'%(k,v) for k,v in self.kwargs.items())
-        return 'galsim.ChromaticFourierSqrtProfile(%r, %s)'%(self._obj, kwargs_str)
+        return 'galsim.ChromaticFourierSqrtProfile(%r, gsparams=%r, propagate_gsparams=%r)'%(
+                self._obj, self.gsparams, self._propagate_gsparams)
 
     def __str__(self):
         return 'galsim.ChromaticFourierSqrtProfile(%s)'%self._obj
@@ -2415,7 +2665,8 @@ class ChromaticFourierSqrtProfile(ChromaticObject):
         @returns the monochromatic object at the given wavelength.
         """
         from .fouriersqrt import FourierSqrt
-        return FourierSqrt(self._obj.evaluateAtWavelength(wave), **self.kwargs)
+        return FourierSqrt(self._obj.evaluateAtWavelength(wave), self.gsparams,
+                           self._propagate_gsparams)
 
 
 class ChromaticOpticalPSF(ChromaticObject):
@@ -2450,22 +2701,24 @@ class ChromaticOpticalPSF(ChromaticObject):
         >>> final_star = galsim.Convolve( [psf, star] )
         >>> final_star.drawImage(bandpass = bp, ...)
 
-    @param   lam           Fiducial wavelength for which diffraction limit and aberrations are
-                           initially defined, in nanometers.
-    @param   diam          Telescope diameter in meters.  Either `diam` or `lam_over_diam` must be
-                           specified.
-    @param   lam_over_diam Ratio of (fiducial wavelength) / telescope diameter in units of
-                           `scale_unit`.  Either `diam` or `lam_over_diam` must be specified.
-    @param   aberrations   An array of aberrations, in units of fiducial wavelength `lam`.  The size
-                           and format of this array is described in the OpticalPSF docstring.
-    @param   scale_unit    Units used to define the diffraction limit and draw images.
-                           [default: galsim.arcsec]
-    @param   **kwargs      Any other keyword arguments to be passed to OpticalPSF, for example,
-                           related to struts, obscuration, oversampling, etc.  See OpticalPSF
-                           docstring for a complete list of options.
+    @param lam              Fiducial wavelength for which diffraction limit and aberrations are
+                            initially defined, in nanometers.
+    @param diam             Telescope diameter in meters.  Either `diam` or `lam_over_diam` must be
+                            specified.
+    @param lam_over_diam    Ratio of (fiducial wavelength) / telescope diameter in units of
+                            `scale_unit`.  Either `diam` or `lam_over_diam` must be specified.
+    @param aberrations      An array of aberrations, in units of fiducial wavelength `lam`.  The
+                            size and format of this array is described in the OpticalPSF docstring.
+    @param scale_unit       Units used to define the diffraction limit and draw images.
+                            [default: galsim.arcsec]
+    @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
+                            details. [default: None]
+    @param **kwargs         Any other keyword arguments to be passed to OpticalPSF, for example,
+                            related to struts, obscuration, oversampling, etc.  See OpticalPSF
+                            docstring for a complete list of options.
     """
     def __init__(self, lam, diam=None, lam_over_diam=None, aberrations=None,
-                 scale_unit=None, **kwargs):
+                 scale_unit=None, gsparams=None, **kwargs):
         from .angle import AngleUnit, arcsec, radians
         # First, take the basic info.
         if scale_unit is None:
@@ -2473,6 +2726,7 @@ class ChromaticOpticalPSF(ChromaticObject):
         elif isinstance(scale_unit, str):
             scale_unit = AngleUnit.from_name(scale_unit)
         self.scale_unit = scale_unit
+        self._gsparams = GSParams.check(gsparams)
 
         # We have to require either diam OR lam_over_diam:
         if ( (diam is None and lam_over_diam is None) or
@@ -2494,6 +2748,7 @@ class ChromaticOpticalPSF(ChromaticObject):
                 self.aberrations = np.append(self.aberrations, [0] * (12-len(self.aberrations)))
         else:
             self.aberrations = np.zeros(12)
+
         # Pop named aberrations from kwargs so aberrations=[0,0,0,0,1] means the same as
         # defocus=1 (w/ all other named aberrations 0).
         for i, ab in enumerate(['defocus', 'astig1', 'astig2', 'coma1', 'coma2', 'trefoil1',
@@ -2509,17 +2764,31 @@ class ChromaticOpticalPSF(ChromaticObject):
         self.SED = SED(1, 'nm', '1')
         self.wave_list = np.array([], dtype=float)
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticOpticalPSF) and
                 self.lam == other.lam and
                 self.lam_over_diam == other.lam_over_diam and
                 np.array_equal(self.aberrations, other.aberrations) and
                 self.scale_unit == other.scale_unit and
+                self.gsparams == other.gsparams and
                 self.kwargs == other.kwargs)
 
     def __hash__(self):
         return hash(("galsim.ChromaticOpticalPSF", self.lam, self.lam_over_diam,
-                     tuple(self.aberrations), self.scale_unit, frozenset(self.kwargs.items())))
+                     tuple(self.aberrations), self.scale_unit, self.gsparams,
+                     frozenset(self.kwargs.items())))
 
     def __repr__(self):
         from .angle import arcsec
@@ -2529,6 +2798,7 @@ class ChromaticOpticalPSF(ChromaticObject):
             s += ', scale_unit=%r'%self.scale_unit
         for k,v in self.kwargs.items():
             s += ', %s=%r'%(k,v)
+        s += ', gsparams=%r'%self.gsparams
         s += ')'
         return s
 
@@ -2549,7 +2819,7 @@ class ChromaticOpticalPSF(ChromaticObject):
         ret = OpticalPSF(
                 lam=wave, diam=self.diam,
                 aberrations=self.aberrations*(self.lam/wave), scale_unit=self.scale_unit,
-                **self.kwargs)
+                gsparams=self.gsparams, **self.kwargs)
         return ret
 
 
@@ -2565,19 +2835,22 @@ class ChromaticAiry(ChromaticObject):
     profile, the ChromaticAiry class is likely to be a less computationally expensive and more
     accurate option.
 
-    @param   lam           Fiducial wavelength for which diffraction limit is initially defined, in
-                           nanometers.
-    @param   diam          Telescope diameter in meters.  Either `diam` or `lam_over_diam` must be
-                           specified.
-    @param   lam_over_diam Ratio of (fiducial wavelength) / telescope diameter in units of
-                           `scale_unit`.  Either `diam` or `lam_over_diam` must be specified.
-    @param   scale_unit    Units used to define the diffraction limit and draw images.
-                           [default: galsim.arcsec]
-    @param   **kwargs      Any other keyword arguments to be passed to Airy: either flux, or
-                           gsparams.  See galsim.Airy docstring for a complete description of these
-                           options.
+    @param lam              Fiducial wavelength for which diffraction limit is initially defined, in
+                            nanometers.
+    @param diam             Telescope diameter in meters.  Either `diam` or `lam_over_diam` must be
+                            specified.
+    @param lam_over_diam    Ratio of (fiducial wavelength) / telescope diameter in units of
+                            `scale_unit`.  Either `diam` or `lam_over_diam` must be specified.
+    @param scale_unit       Units used to define the diffraction limit and draw images.
+                            [default: galsim.arcsec]
+    @param gsparams         An optional GSParams argument.  See the docstring for GSParams for
+                            details. [default: None]
+    @param **kwargs         Any other keyword arguments to be passed to Airy: either flux, or
+                            gsparams.  See galsim.Airy docstring for a complete description of these
+                            options.
     """
-    def __init__(self, lam, diam=None, lam_over_diam=None, scale_unit=None, **kwargs):
+    def __init__(self, lam, diam=None, lam_over_diam=None, scale_unit=None, gsparams=None,
+                 **kwargs):
         from .angle import AngleUnit, arcsec, radians
         # First, take the basic info.
         # We have to require either diam OR lam_over_diam:
@@ -2586,6 +2859,7 @@ class ChromaticAiry(ChromaticObject):
         elif isinstance(scale_unit, str):
             scale_unit = AngleUnit.from_name(scale_unit)
         self.scale_unit = scale_unit
+        self._gsparams = GSParams.check(gsparams)
 
         if ( (diam is None and lam_over_diam is None) or
              (diam is not None and lam_over_diam is not None) ):
@@ -2607,16 +2881,29 @@ class ChromaticAiry(ChromaticObject):
         self.SED = SED(1, 'nm', '1')
         self.wave_list = np.array([], dtype=float)
 
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams=GSParams.check(gsparams)
+        return ret
+
     def __eq__(self, other):
         return (isinstance(other, ChromaticAiry) and
                 self.lam == other.lam and
                 self.lam_over_diam == other.lam_over_diam and
                 self.scale_unit == other.scale_unit and
+                self.gsparams == other.gsparams and
                 self.kwargs == other.kwargs)
 
     def __hash__(self):
         return hash(("galsim.ChromaticAiry", self.lam, self.lam_over_diam, self.scale_unit,
-                     frozenset(self.kwargs.items())))
+                     self.gsparams, frozenset(self.kwargs.items())))
 
     def __repr__(self):
         from .angle import arcsec
@@ -2625,6 +2912,7 @@ class ChromaticAiry(ChromaticObject):
             s += ', scale_unit=%r'%self.scale_unit
         for k,v in self.kwargs.items():
             s += ', %s=%r'%(k,v)
+        s += ', gsparams=%r'%self.gsparams
         s += ')'
         return s
 
@@ -2642,7 +2930,7 @@ class ChromaticAiry(ChromaticObject):
         # wavelength.
         ret = Airy(
             lam_over_diam=self.lam_over_diam*(wave/self.lam), scale_unit=self.scale_unit,
-            **self.kwargs)
+            gsparams=self.gsparams, **self.kwargs)
         return ret
 
 def _findWave(wave_list, wave):

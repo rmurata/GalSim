@@ -214,16 +214,31 @@ class Aperture(object):
                  pupil_plane_im=None, pupil_angle=0.0*radians,
                  pupil_plane_scale=None, pupil_plane_size=None,
                  gsparams=None):
-        from .airy import Airy
 
-        self.diam = diam  # Always need to explicitly specify an aperture diameter.
-        self._obscuration = obscuration  # We store this, even though it's not always used.
+        self._diam = diam  # Always need to explicitly specify an aperture diameter.
+        self._lam = lam
+        self._circular_pupil = circular_pupil
+        self._obscuration = obscuration
+        self._nstruts = nstruts
+        self._strut_thick = strut_thick
+        self._strut_angle = strut_angle
+        self._oversampling = oversampling
+        self._pad_factor = pad_factor
+        self._screen_list = screen_list
+        self._pupil_plane_im = pupil_plane_im
+        self._pupil_angle = pupil_angle
+        self._input_pupil_plane_scale = pupil_plane_scale
+        self._input_pupil_plane_size = pupil_plane_size
         self._gsparams = GSParams.check(gsparams)
 
         if diam <= 0.:
             raise GalSimRangeError("Invalid diam.", diam, 0.)
         if obscuration < 0. or obscuration >= 1.:
             raise GalSimRangeError("Invalid obscuration.", obscuration, 0., 1.)
+        if not isinstance(strut_angle, Angle):
+            raise TypeError("strut_angle must be a galsim.Angle instance.")
+        if not isinstance(pupil_angle, Angle):
+            raise TypeError("pupil_angle must be a galsim.Angle instance.")
 
         # You can either set geometric properties, or use a pupil image, but not both, so check for
         # that here.  One caveat is that we allow sanity checking the sampling of a pupil_image by
@@ -245,6 +260,23 @@ class Aperture(object):
                 "Wavelength `lam` must be specified with `screen_list`.",
                 screen_list=screen_list, lam=lam)
 
+    # For each of these, the actual value is defined during the construction of the _illuminated
+    # array, so access that (lazy) property first.
+    @property
+    def pupil_plane_scale(self):
+        self._illuminated
+        return self._pupil_plane_scale
+    @property
+    def pupil_plane_size(self):
+        self._illuminated
+        return self._pupil_plane_size
+    @property
+    def npix(self):
+        self._illuminated
+        return self._npix
+
+    @property
+    def good_pupil_size(self):
         # Although the user can set the pupil plane size and scale directly if desired, in most
         # cases it's nicer to have GalSim try to pick good values for these.
 
@@ -256,8 +288,11 @@ class Aperture(object):
         # less accurate, quintic interpolant, which means we can benefit from improved sampling
         # (oversampling > 1.0) in some cases, especially when we're *not* modeling an atmosphere
         # which would otherwise tend to damp contributions at large k.
-        good_pupil_size = 2 * diam * oversampling
+        return 2 * self.diam * self._oversampling
 
+    @property
+    def good_pupil_scale(self):
+        from .airy import Airy
         # For the pupil plane sampling interval, details like the obscuration and GSParams *are*
         # important as they affect the amount of aliasing encountered.  (An Airy profile has an
         # infinite extent in real space, so it *always* aliases at some level, more so with an
@@ -267,98 +302,92 @@ class Aperture(object):
         # `screen_list` argument was supplied, then we also check its .stepk propertry, which
         # aggregates a good sampling interval from all of the wrapped PhaseScreens, and keep the
         # smaller stepk.
-        if lam is None:
+        if self._lam is None:
             # For Airy, pupil_plane_scale is independent of wavelength.  We could build an Airy with
             # lam_over_diam=1.0 and then alter the `good_pupil_scale = ...` line below
             # appropriately, but it's easier to just arbitrarily set `lam=500` if it wasn't set.
             lam = 500.0
-        airy = Airy(diam=diam, lam=lam, obscuration=obscuration, gsparams=self._gsparams)
+        else:
+            lam = self._lam
+        airy = Airy(diam=self.diam, lam=lam, obscuration=self.obscuration, gsparams=self.gsparams)
         stepk = airy.stepk
-        if screen_list is not None:
-            screen_list = PhaseScreenList(screen_list)
+        if self._screen_list is not None:
+            screen_list = PhaseScreenList(self._screen_list)
             stepk = min(stepk,
-                        screen_list._getStepK(lam=lam, diam=diam, obscuration=obscuration,
-                                              gsparams=self._gsparams))
-        good_pupil_scale = (stepk * lam * 1.e-9 * (radians / arcsec) / (2 * np.pi * pad_factor))
+                        screen_list._getStepK(lam=lam, diam=self.diam, obscuration=self.obscuration,
+                                              gsparams=self.gsparams))
+        return stepk * lam * 1.e-9 * (radians / arcsec) / (2 * np.pi * self._pad_factor)
 
+    @lazy_property
+    def _illuminated(self):
         # Now that we have good candidate sizes and scales, we load or generate the pupil plane
         # array.
-        if pupil_plane_im is not None:  # Use image of pupil plane
-            self._load_pupil_plane(pupil_plane_im, pupil_angle, pupil_plane_scale,
-                                   good_pupil_scale, good_pupil_size)
+        if self._pupil_plane_im is not None:  # Use image of pupil plane
+            return self._load_pupil_plane()
         else:  # Use geometric parameters.
-            if pupil_plane_scale is not None:
+            if self._input_pupil_plane_scale is not None:
+                self._pupil_plane_scale = self._input_pupil_plane_scale
                 # Check input scale and warn if looks suspicious.
-                if pupil_plane_scale > good_pupil_scale:
-                    ratio = good_pupil_scale / pupil_plane_scale
+                if self._pupil_plane_scale > self.good_pupil_scale:
+                    ratio = self.good_pupil_scale / self._pupil_plane_scale
                     galsim_warn("Input pupil_plane_scale may be too large for good sampling.\n"
                                 "Consider decreasing pupil_plane_scale by a factor %f, and/or "
                                 "check PhaseScreenPSF outputs for signs of folding in real "
                                 "space."%(1./ratio))
             else:
-                pupil_plane_scale = good_pupil_scale
-            if pupil_plane_size is not None:
+                self._pupil_plane_scale = self.good_pupil_scale
+            if self._input_pupil_plane_size is not None:
+                self._pupil_plane_size = self._input_pupil_plane_size
                 # Check input size and warn if looks suspicious
-                if pupil_plane_size < good_pupil_size:
-                    ratio = good_pupil_size / pupil_plane_size
+                if self._pupil_plane_size < self.good_pupil_size:
+                    ratio = self.good_pupil_size / self._pupil_plane_size
                     galsim_warn("Input pupil_plane_size may be too small for good focal-plane"
                                 "sampling.\n"
                                 "Consider increasing pupil_plane_size by a factor %f, and/or "
                                 "check PhaseScreenPSF outputs for signs of undersampling."%ratio)
             else:
-                pupil_plane_size = good_pupil_size
-            self._generate_pupil_plane(circular_pupil,
-                                       nstruts, strut_thick, strut_angle,
-                                       pupil_plane_scale, pupil_plane_size)
+                self._pupil_plane_size = self.good_pupil_size
+            return self._generate_pupil_plane()
 
-    def _generate_pupil_plane(self, circular_pupil, nstruts, strut_thick, strut_angle,
-                              pupil_plane_scale, pupil_plane_size):
+    def _generate_pupil_plane(self):
         """ Create an array of illuminated pixels parameterically.
         """
-        ratio = pupil_plane_size/pupil_plane_scale
+        ratio = self._pupil_plane_size/self._pupil_plane_scale
         # Fudge a little to prevent good_fft_size() from turning 512.0001 into 768.
         ratio *= (1.0 - 1.0/2**14)
-        self.npix = Image.good_fft_size(int(np.ceil(ratio)))
+        self._npix = Image.good_fft_size(int(np.ceil(ratio)))
 
         # Check FFT size
-        if self.npix > self._gsparams.maximum_fft_size:
-            raise GalSimFFTSizeError("Created pupil plane array that is too large.",self.npix)
+        if self._npix > self.gsparams.maximum_fft_size:
+            raise GalSimFFTSizeError("Created pupil plane array that is too large.",self._npix)
 
-        self.pupil_plane_size = pupil_plane_size
         # Shrink scale such that size = scale * npix exactly.
-        self.pupil_plane_scale = pupil_plane_size / self.npix
-        # Save params for str/repr
-        self._circular_pupil = circular_pupil
-        self._nstruts = nstruts
-        self._strut_thick = strut_thick
-        self._strut_angle = strut_angle
+        self._pupil_plane_scale = self._pupil_plane_size / self._npix
 
         radius = 0.5*self.diam
-        if circular_pupil:
-            self._illuminated = (self.rsqr < radius**2)
+        if self._circular_pupil:
+            illuminated = (self.rsqr < radius**2)
             if self.obscuration > 0.:
-                self._illuminated *= self.rsqr >= (radius*self.obscuration)**2
+                illuminated *= self.rsqr >= (radius*self.obscuration)**2
         else:
-            self._illuminated = (np.abs(self.u) < radius) & (np.abs(self.v) < radius)
+            illuminated = (np.abs(self.u) < radius) & (np.abs(self.v) < radius)
             if self.obscuration > 0.:
-                self._illuminated *= ((np.abs(self.u) >= radius*self.obscuration) *
+                illuminated *= ((np.abs(self.u) >= radius*self.obscuration) *
                                       (np.abs(self.v) >= radius*self.obscuration))
 
-        if nstruts > 0:
-            if not isinstance(strut_angle, Angle):
-                raise TypeError("Input kwarg strut_angle must be a galsim.Angle instance.")
+        if self._nstruts > 0:
             # Add the initial rotation if requested, converting to radians.
             rot_u, rot_v = self.u, self.v
-            if strut_angle.rad != 0.:
-                rot_u, rot_v = rotate_xy(rot_u, rot_v, -strut_angle)
-            rotang = 360. * degrees / nstruts
+            if self._strut_angle.rad != 0.:
+                rot_u, rot_v = rotate_xy(rot_u, rot_v, -self._strut_angle)
+            rotang = 360. * degrees / self._nstruts
             # Then loop through struts setting to zero the regions which lie under the strut
-            for istrut in range(nstruts):
+            for istrut in range(self._nstruts):
                 rot_u, rot_v = rotate_xy(rot_u, rot_v, -rotang)
-                self._illuminated *= ((np.abs(rot_u) >= radius * strut_thick) + (rot_v < 0.0))
+                illuminated *= ((np.abs(rot_u) >= radius * self._strut_thick) + (rot_v < 0.0))
+        return illuminated
 
-    def _load_pupil_plane(self, pupil_plane_im, pupil_angle, pupil_plane_scale, good_pupil_scale,
-                          good_pupil_size):
+    def _load_pupil_plane(self):
         """ Create an array of illuminated pixels with appropriate size and scale from an input
         image of the pupil.  The basic strategy is:
 
@@ -371,76 +400,76 @@ class Aperture(object):
         from . import fits
         # Handle multiple types of input: NumPy array, galsim.Image, or string for filename with
         # image.
-        if isinstance(pupil_plane_im, np.ndarray):
+        if isinstance(self._pupil_plane_im, np.ndarray):
             # Make it into an image.
-            pupil_plane_im = Image(pupil_plane_im)
-        elif isinstance(pupil_plane_im, Image):
+            self._pupil_plane_im = Image(self._pupil_plane_im)
+        elif isinstance(self._pupil_plane_im, Image):
             # Make sure not to overwrite input image.
-            pupil_plane_im = pupil_plane_im.copy()
+            self._pupil_plane_im = self._pupil_plane_im.copy()
         else:
             # Read in image of pupil plane from file.
-            pupil_plane_im = fits.read(pupil_plane_im)
+            self._pupil_plane_im = fits.read(self._pupil_plane_im)
         # scale = pupil_plane_im.scale # Interpret as either the pixel scale in meters, or None.
-        pp_arr = pupil_plane_im.array
-        self.npix = pp_arr.shape[0]
+        pp_arr = self._pupil_plane_im.array
+        self._npix = pp_arr.shape[0]
 
         # Check FFT size
-        if self.npix > self._gsparams.maximum_fft_size:
-            raise GalSimFFTSizeError("Loaded pupil plane array that is too large.", self.npix)
+        if self._npix > self.gsparams.maximum_fft_size:
+            raise GalSimFFTSizeError("Loaded pupil plane array that is too large.", self._npix)
 
         # Sanity checks
-        if pupil_plane_im.array.shape[0] != pupil_plane_im.array.shape[1]:
+        if self._pupil_plane_im.array.shape[0] != self._pupil_plane_im.array.shape[1]:
             raise GalSimValueError("Input pupil_plane_im must be square.",
-                                   pupil_plane_im.array.shape)
-        if pupil_plane_im.array.shape[0] % 2 == 1:
+                                   self._pupil_plane_im.array.shape)
+        if self._pupil_plane_im.array.shape[0] % 2 == 1:
             raise GalSimValueError("Input pupil_plane_im must have even sizes.",
-                                   pupil_plane_im.array.shape)
+                                   self._pupil_plane_im.array.shape)
 
         # Set the scale, priority is:
         # 1.  pupil_plane_scale kwarg
         # 2.  image.scale if not None
         # 3.  Use diameter and farthest illuminated pixel.
-        if pupil_plane_scale is not None:
-            self.pupil_plane_scale = pupil_plane_scale
-        elif pupil_plane_im.scale is not None:
-            self.pupil_plane_scale = pupil_plane_im.scale
+        if self._input_pupil_plane_scale is not None:
+            self._pupil_plane_scale = self._input_pupil_plane_scale
+        elif self._pupil_plane_im.scale is not None:
+            self._pupil_plane_scale = self._pupil_plane_im.scale
         else:
-            # If self.pupil_plane_scale is not set yet, then figure it out from the distance
+            # If self._pupil_plane_scale is not set yet, then figure it out from the distance
             # of the farthest illuminated pixel from the image center and the aperture diameter.
-            # below is essentially np.linspace(-0.5, 0.5, self.npix)
-            u = np.fft.fftshift(np.fft.fftfreq(self.npix))
+            # below is essentially np.linspace(-0.5, 0.5, self._npix)
+            u = np.fft.fftshift(np.fft.fftfreq(self._npix))
             u, v = np.meshgrid(u, u)
             r = np.hypot(u, v)
-            rmax_illum = np.max(r*(pupil_plane_im.array > 0))
-            self.pupil_plane_scale = self.diam / (2.0 * rmax_illum * self.npix)
-        self.pupil_plane_size = self.pupil_plane_scale * self.npix
+            rmax_illum = np.max(r*(self._pupil_plane_im.array > 0))
+            self._pupil_plane_scale = self.diam / (2.0 * rmax_illum * self._npix)
+        self._pupil_plane_size = self._pupil_plane_scale * self._npix
 
         # Check the pupil plane size here and bump it up if necessary.
-        if self.pupil_plane_size < good_pupil_size:
+        if self._pupil_plane_size < self.good_pupil_size:
             new_npix = Image.good_fft_size(int(np.ceil(
-                    good_pupil_size/self.pupil_plane_scale)))
-            pad_width = (new_npix-self.npix)//2
+                    self.good_pupil_size/self._pupil_plane_scale)))
+            pad_width = (new_npix-self._npix)//2
             pp_arr = np.pad(pp_arr, [(pad_width, pad_width)]*2, mode='constant')
-            self.npix = new_npix
-            self.pupil_plane_size = self.pupil_plane_scale * self.npix
+            self._npix = new_npix
+            self._pupil_plane_size = self._pupil_plane_scale * self._npix
 
         # Check sampling interval and warn if it's not good enough.
-        if self.pupil_plane_scale > good_pupil_scale:
-            ratio = self.pupil_plane_scale / good_pupil_scale
+        if self._pupil_plane_scale > self.good_pupil_scale:
+            ratio = self._pupil_plane_scale / self.good_pupil_scale
             galsim_warn("Input pupil plane image may not be sampled well enough!\n"
                         "Consider increasing sampling by a factor %f, and/or check "
                         "PhaseScreenPSF outputs for signs of folding in real space."%ratio)
 
-        if pupil_angle.rad == 0.:
-            self._illuminated = pp_arr.astype(bool)
+        if self._pupil_angle.rad == 0.:
+            return pp_arr.astype(bool)
         else:
             # Rotate the pupil plane image as required based on the `pupil_angle`, being careful to
             # ensure that the image is one of the allowed types.  We ignore the scale.
-            b = _BoundsI(1,self.npix,1,self.npix)
+            b = _BoundsI(1,self._npix,1,self._npix)
             im = _Image(pp_arr, b, PixelScale(1.))
             int_im = InterpolatedImage(im, x_interpolant='linear',
                                        calculate_stepk=False, calculate_maxk=False)
-            int_im = int_im.rotate(pupil_angle)
+            int_im = int_im.rotate(self._pupil_angle)
             new_im = Image(pp_arr.shape[1], pp_arr.shape[0])
             new_im = int_im.drawImage(image=new_im, scale=1., method='no_pixel')
             pp_arr = new_im.array
@@ -450,7 +479,20 @@ class Aperture(object):
             # value are set to zero (False).
             max_pp_val = np.max(pp_arr)
             pp_arr[pp_arr < 0.5*max_pp_val] = 0.
-            self._illuminated = pp_arr.astype(bool)
+            return pp_arr.astype(bool)
+
+    @property
+    def gsparams(self):
+        return self._gsparams
+
+    def withGSParams(self, gsparams):
+        """Create a version of the current aperture with the given gsparams
+        """
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        return ret
 
     # Used in Aperture.__str__ and OpticalPSF.__str__
     def _geometry_str(self):
@@ -469,12 +511,12 @@ class Aperture(object):
 
     def __str__(self):
         s = "galsim.Aperture(diam=%r"%self.diam
-        if hasattr(self, '_circular_pupil'):  # Pupil was created geometrically, so use that here.
+        if self._pupil_plane_im is None:
+            # Pupil was created geometrically, so use that here.
             s += self._geometry_str()
         s += ")"
         return s
 
-    # Used in Aperture.__repr__ and OpticalPSF.__repr__
     def _geometry_repr(self):
         s = ""
         if not self._circular_pupil:
@@ -491,26 +533,44 @@ class Aperture(object):
 
     def __repr__(self):
         s = "galsim.Aperture(diam=%r"%self.diam
-        if hasattr(self, '_circular_pupil'):  # Pupil was created geometrically, so use that here.
+        if self._pupil_plane_im is None:
+            # Pupil was created geometrically, so use that here.
             s += self._geometry_repr()
-            s += ", pupil_plane_scale=%r"%self.pupil_plane_scale
-            s += ", pupil_plane_size=%r"%self.pupil_plane_size
-        else:  # Pupil was created from image, so use that instead.
+            s += ", pupil_plane_scale=%r"%self._input_pupil_plane_scale
+            s += ", pupil_plane_size=%r"%self._input_pupil_plane_size
+            s += ", oversampling=%r"%self._oversampling
+            s += ", pad_factor=%r"%self._pad_factor
+        else:
+            # Pupil was created from image, so use that instead.
             # It's slightly less annoying to see an enormous stream of zeros fly by than an enormous
             # stream of Falses, so convert to int16.
             tmp = self.illuminated.astype(np.int16).tolist()
             s += ", pupil_plane_im=array(%r"%tmp+", dtype='int16')"
-            s += ", pupil_plane_scale=%r"%self.pupil_plane_scale
-        if self._gsparams != GSParams():
-            s += ", gsparams=%r"%self._gsparams
+            s += ", pupil_plane_scale=%r"%self._pupil_plane_scale
+        if self.gsparams != GSParams():
+            s += ", gsparams=%r"%self.gsparams
         s += ")"
         return s
 
     def __eq__(self, other):
-        return (isinstance(other, Aperture) and
+        if not (isinstance(other, Aperture) and
                 self.diam == other.diam and
-                self.pupil_plane_scale == other.pupil_plane_scale and
-                np.array_equal(self.illuminated, other.illuminated))
+                self._gsparams == other._gsparams):
+            return False
+        if self._pupil_plane_im is not None:
+            return (self.pupil_plane_scale == other.pupil_plane_scale and
+                    np.array_equal(self.illuminated, other.illuminated))
+        else:
+            return (other._pupil_plane_im is None and
+                    self._circular_pupil == other._circular_pupil and
+                    self._obscuration == other._obscuration and
+                    self._nstruts == other._nstruts and
+                    self._strut_thick == other._strut_thick and
+                    self._strut_angle == other._strut_angle and
+                    self._input_pupil_plane_scale == other._input_pupil_plane_scale and
+                    self._input_pupil_plane_size == other._input_pupil_plane_size and
+                    self._oversampling == other._oversampling and
+                    self._pad_factor == other._pad_factor)
 
     def __hash__(self):
         # Cache since self.illuminated may be large.
@@ -533,13 +593,18 @@ class Aperture(object):
         """ Unit-disk normalized pupil plane coordinate as a complex number:
         (x, y) => x + 1j * y.
         """
-        u = np.fft.fftshift(np.fft.fftfreq(self.npix, self.diam/self.pupil_plane_size/2.0))
+        self._illuminated
+        u = np.fft.fftshift(np.fft.fftfreq(self._npix, self.diam/self._pupil_plane_size/2.0))
         u, v = np.meshgrid(u, u)
         return u + 1j * v
 
     @lazy_property
     def _uv(self):
-        u = np.fft.fftshift(np.fft.fftfreq(self.npix, 1./self.pupil_plane_size))
+        if not hasattr(self, '_npix'):
+            # Need this check, since `_uv` is used by `_illuminated`, so need to make sure we
+            # don't have an infinite loop.
+            self._illuminated
+        u = np.fft.fftshift(np.fft.fftfreq(self._npix, 1./self._pupil_plane_size))
         u, v =  np.meshgrid(u, u)
         return u, v
 
@@ -559,6 +624,11 @@ class Aperture(object):
         return self.u**2 + self.v**2
 
     @property
+    def diam(self):
+        """Aperture diameter in meters"""
+        return self._diam
+
+    @property
     def obscuration(self):
         """Fraction linear obscuration of pupil."""
         return self._obscuration
@@ -567,8 +637,12 @@ class Aperture(object):
         # Let unpickled object reconstruct cached values on-the-fly instead of including them in the
         # pickle.
         d = self.__dict__.copy()
-        for k in ('_rho', '_u', '_v', '_rsqr'):
+        for k in ('rho', '_uv', 'rsqr'):
             d.pop(k, None)
+        # Only reconstruct _illuminated if we made it from geometry.  If loaded, it's probably
+        # faster to serialize the array.
+        if self._pupil_plane_im is None:
+            d.pop('_illuminated', None)
         return d
 
     # Some quick notes for Josh:
@@ -1126,6 +1200,10 @@ class PhaseScreenPSF(GSObject):
                 raise GalSimIncompatibleValuesError(
                     "Diameter required if aperture not specified directly.", diam=None, aper=aper)
             aper = Aperture(lam=lam, screen_list=self._screen_list, gsparams=gsparams, **kwargs)
+        elif gsparams is None:
+            gsparams = aper.gsparams
+        else:
+            aper = aper.withGSParams(gsparams)
         self.aper = aper
 
         if not isinstance(theta[0], Angle) or not isinstance(theta[1], Angle):
@@ -1155,28 +1233,56 @@ class PhaseScreenPSF(GSObject):
         self._kcrit = kcrit
         # We'll set these more intelligently as needed below
         self._second_kick = second_kick
-
-        # Need to put in a placeholder SBProfile so that calls to stepk and maxk work
-        # without having to do _prepareDraw.
-        # All we really need is for the stepk and maxk to be correct, so use the
-        # force_ options to set them how we want.
-        if _force_stepk > 0.:
-            dummy_stepk = _force_stepk
-        else:
-            dummy_stepk = self._screen_list._getStepK(lam=self.lam, diam=self.aper.diam,
-                                                      obscuration=self.aper.obscuration,
-                                                      gsparams=self._gsparams)
-        if _force_maxk > 0.:
-            dummy_maxk = _force_maxk
-        else:
-            dummy_maxk = self.aper._getMaxK(self.lam, self.scale_unit)
-        dummy_image = _Image(np.array([[self._flux]], dtype=np.float),
-                             _BoundsI(1, 1, 1, 1), PixelScale(1.))
-        dummy_interpolant = 'delta'  # Use delta so it doesn't contribute to stepk
-        self._ii = InterpolatedImage(
-                dummy_image, pad_factor=1.0, x_interpolant=dummy_interpolant,
-                _force_stepk=dummy_stepk, _force_maxk=dummy_maxk)
         self._screen_list._delayCalculation(self)
+        self.finalized = False
+
+    @lazy_property
+    def _real_ii(self):
+        ii = InterpolatedImage(
+                self.img, x_interpolant=self.interpolant,
+                _force_stepk=self._force_stepk, _force_maxk=self._force_maxk,
+                pad_factor=self._ii_pad_factor,
+                use_true_center=False, gsparams=self._gsparams)
+
+        if not self._suppress_warning:
+            specified_stepk = 2*np.pi/(self.img.array.shape[0]*self.scale)
+            observed_stepk = ii.stepk
+
+            if observed_stepk < specified_stepk:
+                galsim_warn(
+                    "The calculated stepk (%g) for PhaseScreenPSF is smaller than what was used "
+                    "to build the wavefront (%g). This could lead to aliasing problems. "
+                    "Increasing pad_factor is recommended."%(observed_stepk, specified_stepk))
+        return ii
+
+    @lazy_property
+    def _dummy_ii(self):
+        # If we need self._ii before we've done _prepareDraw, then build a placeholder that has
+        # roughly the right properties. All we really need is for the stepk and maxk to be
+        # correct, so use the force_ options to set them how we want.
+        if self._force_stepk > 0.:
+            stepk = self._force_stepk
+        else:
+            stepk = self._screen_list._getStepK(lam=self.lam, diam=self.aper.diam,
+                                                obscuration=self.aper.obscuration,
+                                                gsparams=self._gsparams)
+        if self._force_maxk > 0.:
+            maxk = self._force_maxk
+        else:
+            maxk = self.aper._getMaxK(self.lam, self.scale_unit)
+        image = _Image(np.array([[self._flux]], dtype=np.float),
+                             _BoundsI(1, 1, 1, 1), PixelScale(1.))
+        interpolant = 'delta'  # Use delta so it doesn't contribute to stepk
+        return InterpolatedImage(
+                image, pad_factor=1.0, x_interpolant=interpolant,
+                _force_stepk=stepk, _force_maxk=maxk)
+
+    @property
+    def _ii(self):
+        if self.finalized:
+            return self._real_ii
+        else:
+            return self._dummy_ii
 
     @property
     def kcrit(self):
@@ -1201,7 +1307,7 @@ class PhaseScreenPSF(GSObject):
             r0_500 = self._screen_list.r0_500_effective
             if r0_500 is None:  # No AtmosphericScreens in list
                 return Airy(lam=self.lam, diam=self.aper.diam,
-                            obscuration=self.aper.obscuration)
+                            obscuration=self.aper.obscuration, gsparams=self._gsparams)
             else:
                 r0 = r0_500 * (self.lam/500.)**(6./5)
                 return SecondKick(
@@ -1214,6 +1320,15 @@ class PhaseScreenPSF(GSObject):
     @property
     def flux(self):
         return self._flux
+
+    @doc_inherit
+    def withGSParams(self, gsparams):
+        if gsparams is self.gsparams: return self
+        from copy import copy
+        ret = copy(self)
+        ret._gsparams = GSParams.check(gsparams)
+        ret.aper = self.aper.withGSParams(gsparams)
+        return ret
 
     def __str__(self):
         return ("galsim.PhaseScreenPSF(%s, lam=%s, exptime=%s)" %
@@ -1273,21 +1388,7 @@ class PhaseScreenPSF(GSObject):
         b = _BoundsI(1,self.aper.npix,1,self.aper.npix)
         self.img = _Image(self.img, b, PixelScale(self.scale))
 
-        self._ii = InterpolatedImage(
-                self.img, x_interpolant=self.interpolant,
-                _force_stepk=self._force_stepk, _force_maxk=self._force_maxk,
-                pad_factor=self._ii_pad_factor,
-                use_true_center=False, gsparams=self._gsparams)
-
-        if not self._suppress_warning:
-            specified_stepk = 2*np.pi/(self.img.array.shape[0]*self.scale)
-            observed_stepk = self._ii.stepk
-
-            if observed_stepk < specified_stepk:
-                galsim_warn(
-                    "The calculated stepk (%g) for PhaseScreenPSF is smaller than what was used "
-                    "to build the wavefront (%g). This could lead to aliasing problems. "
-                    "Increasing pad_factor is recommended."%(observed_stepk, specified_stepk))
+        self.finalized = True
 
     @property
     def _sbp(self):
@@ -1299,17 +1400,13 @@ class PhaseScreenPSF(GSObject):
         d = self.__dict__.copy()
         # The SBProfile is picklable, but it is pretty inefficient, due to the large images being
         # written as a string.  Better to pickle the image and remake the InterpolatedImage.
-        del d['_ii']
+        d.pop('_dummy_ii',None)
+        d.pop('_real_ii',None)
+        d.pop('second_kick',None)
         return d
 
     def __setstate__(self, d):
         self.__dict__ = d
-        self._ii = InterpolatedImage(self.img, x_interpolant=self.interpolant,
-                                     use_true_center=False,
-                                     pad_factor=self._ii_pad_factor,
-                                     _force_stepk=self._force_stepk,
-                                     _force_maxk=self._force_maxk,
-                                     gsparams=self._gsparams)
 
     @property
     def _maxk(self):
@@ -1709,7 +1806,7 @@ class OpticalPSF(GSObject):
         s = "galsim.OpticalPSF(lam=%s, diam=%s" % (screen.lam_0, self._psf.aper.diam)
         if any(screen.aberrations):
             s += ", aberrations=[" + ",".join(str(ab) for ab in screen.aberrations) + "]"
-        if hasattr(self._psf.aper, '_circular_pupil'):
+        if self._psf.aper._pupil_plane_im is None:
             s += self._psf.aper._geometry_str()
         if screen.annular_zernike:
             s += ", annular_zernike=True"

@@ -251,7 +251,7 @@ def BuildFile(config, file_num=0, image_num=0, obj_num=0, logger=None):
     t2 = time.time()
 
     #Add file_name to config["output"]["_file_names"]
-    config["output"]["_file_names"][file_num]["file_name"] = file_name
+    #config["output"]["_file_names"][file_num]["file_name"] = file_name
 
     return file_name, t2-t1
 

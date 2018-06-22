@@ -253,10 +253,10 @@ def WriteExtraOutputs(config, main_data, logger=None):
         extra_files[key] = file_name
 
     #Add extra_files to config
-    try:
-        config["output"]["_file_names"][config["file_num"]]["extra"].update(extra_files)
-    except KeyError:
-        config["output"]["_file_names"][config["file_num"]]["extra"] = extra_files
+    #try:
+    #    config["output"]["_file_names"][config["file_num"]]["extra"].update(extra_files)
+    #except KeyError:
+    #    config["output"]["_file_names"][config["file_num"]]["extra"] = extra_files
 
 
 def AddExtraOutputHDUs(config, main_data, logger=None):

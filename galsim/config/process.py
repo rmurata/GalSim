@@ -753,7 +753,7 @@ def Process(config, logger=None, njobs=1, job=1, new_params=None, except_abort=F
     nfiles = galsim.config.output.GetNFiles(config)
     logger.debug('nfiles = %d',nfiles)
     #Setup up file_names config entry
-    config["output"]["_file_names"] = { file_num : { "file_name" : None, "extra" : {} } for file_num in range(nfiles) }
+    #config["output"]["_file_names"] = { file_num : { "file_name" : None, "extra" : {} } for file_num in range(nfiles) }
 
     if njobs > 1:
         # Start each job at file_num = nfiles * job / njobs

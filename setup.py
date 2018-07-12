@@ -17,6 +17,7 @@
 #
 from __future__ import print_function
 import sys,os,glob,re
+
 import platform
 import ctypes
 import ctypes.util
@@ -25,6 +26,8 @@ import subprocess
 import re
 
 try:
+    sys.path.insert(1, "/home/rmurata/.local/lib/python2.7/site-packages")
+
     from setuptools import setup, Extension, find_packages
     from setuptools.command.build_ext import build_ext
     from setuptools.command.build_clib import build_clib
@@ -267,10 +270,11 @@ def try_compile(cpp_code, cc, cflags=[], lflags=[]):
         lines = p.stdout.readlines()
         p.communicate()
         #print('output = ',b''.join(lines).decode())
+        print("p:", p)
         if p.returncode != 0:
             print('Trying compile command:')
             print(cmd)
-            print('output = ',b''.join(lines).decode())
+            #print('output = ',b''.join(lines).decode())
     except (IOError,OSError) as e:
         print('Trying compile command:')
         print(cmd)

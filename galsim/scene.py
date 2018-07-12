@@ -349,7 +349,7 @@ class COSMOSCatalog(object):
     def __len__(self): return self.nobjects
 
     def makeGalaxy(self, index=None, gal_type=None, chromatic=False, noise_pad_size=5,
-                   deep=False, sersic_prec=0.05, rng=None, n_random=None, gsparams=None):
+                   deep=False, sersic_prec=0.05, rng=None, n_random=None, gsparams=None, trunc=None):
         """
         Routine to construct GSObjects corresponding to the catalog entry with a particular index
         or indices.
@@ -426,11 +426,11 @@ class COSMOSCatalog(object):
                     or a list of them if `index` is an iterable.
         """
         return self._makeGalaxy(self, index, gal_type, chromatic, noise_pad_size,
-                                deep, sersic_prec, rng, n_random, gsparams)
+                                deep, sersic_prec, rng, n_random, gsparams, trunc)
 
     @staticmethod
     def _makeGalaxy(self, index=None, gal_type=None, chromatic=False, noise_pad_size=5,
-                    deep=False, sersic_prec=0.05, rng=None, n_random=None, gsparams=None):
+                    deep=False, sersic_prec=0.05, rng=None, n_random=None, gsparams=None, trunc=None):
         from .random import BaseDeviate
         if not self.canMakeReal():
             if gal_type is None:
@@ -490,7 +490,7 @@ class COSMOSCatalog(object):
             for idx in indices:
                 record = self.getParametricRecord(idx)
                 gal = COSMOSCatalog._buildParametric(record, sersic_prec, gsparams,
-                                                     chromatic, bandpass, sed)
+                                                     chromatic, bandpass, sed, trunc)
                 gal_list.append(gal)
 
         # If trying to use the 23.5 sample and "fake" a deep sample, rescale the size and flux as

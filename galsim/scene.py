@@ -636,6 +636,13 @@ class COSMOSCatalog(object):
         if not use_bulgefit and not record['viable_sersic']:  # pragma: no cover
             raise GalSimError("Cannot make parametric model for this galaxy!")
 
+        ### added by Ryoma Murata for SynPipe 2 project
+        reff      = float(record["reff"]    )
+        # Truncate the flux at trunc x reff
+        trunc     = 10.0
+        trunc     = trunc * reff
+        ### added by Ryoma Murata for SynPipe 2 project
+
         if use_bulgefit:
             # Bulge parameters:
             # Minor-to-major axis ratio:
@@ -662,17 +669,17 @@ class COSMOSCatalog(object):
                 target_bulge_mag = record['mag_auto']-2.5*math.log10(bfrac)
                 bulge_sed = sed[0].atRedshift(z).withMagnitude(
                     target_bulge_mag, bandpass)
-                bulge = DeVaucouleurs(half_light_radius=bulge_hlr, gsparams=gsparams)
+                bulge = DeVaucouleurs(half_light_radius=bulge_hlr, gsparams=gsparams, trunc=trunc)
                 bulge *= bulge_sed
                 target_disk_mag = record['mag_auto']-2.5*math.log10((1.-bfrac))
                 disk_sed = sed[1].atRedshift(z).withMagnitude(target_disk_mag, bandpass)
-                disk = Exponential(half_light_radius=disk_hlr, gsparams=gsparams)
+                disk = Exponential(half_light_radius=disk_hlr, gsparams=gsparams, trunc=trunc)
                 disk *= disk_sed
             else:
                 bulge = DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr,
-                                             gsparams=gsparams)
+                                             gsparams=gsparams, trunc=trunc)
                 disk = Exponential(flux=disk_flux, half_light_radius=disk_hlr,
-                                          gsparams=gsparams)
+                                          gsparams=gsparams, trunc=trunc)
 
             # Apply shears for intrinsic shape.
             if bulge_q < 1.:  # pragma: no branch
@@ -701,7 +708,7 @@ class COSMOSCatalog(object):
             gal_flux = record['flux'][0]
 
             if chromatic:
-                gal = Sersic(gal_n, flux=1., half_light_radius=gal_hlr, gsparams=gsparams)
+                gal = Sersic(gal_n, flux=1., half_light_radius=gal_hlr, gsparams=gsparams, trunc=trunc)
                 if gal_n < 1.5:
                     use_sed = sed[1] # disk
                 elif gal_n >= 1.5 and gal_n < 3.0:
@@ -712,7 +719,7 @@ class COSMOSCatalog(object):
                 z = record['zphot']
                 gal *= use_sed.atRedshift(z).withMagnitude(target_mag, bandpass)
             else:
-                gal = Sersic(gal_n, flux=gal_flux, half_light_radius=gal_hlr, gsparams=gsparams)
+                gal = Sersic(gal_n, flux=gal_flux, half_light_radius=gal_hlr, gsparams=gsparams, trunc=trunc)
 
             # Apply shears for intrinsic shape.
             if gal_q < 1.:  # pragma: no branch
